@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.routes import documents_router
 from config import settings
 
 app = FastAPI(
@@ -18,6 +19,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(documents_router, prefix="/api/documents", tags=["documents"])
 
 
 @app.get("/health")
