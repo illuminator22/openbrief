@@ -97,6 +97,30 @@ def _detect_section_title(text: str) -> str | None:
     return None
 
 
+# Top-level section patterns: ARTICLE X, "5 CONTRACT:", "Section 5.", ALL-CAPS headings.
+# Sub-sections like 4.1.2, 13.2.1, (a), (b) are NOT top-level.
+_RE_TOP_LEVEL_NUMBERED = re.compile(r"^\d+(?:\s+[A-Z]|[\.:])")
+
+def _is_top_level_section(text: str) -> bool:
+    """Check if text starts with a top-level section header.
+
+    Top-level sections act as merge boundaries in Phase 3.
+    Sub-sections (4.1.2, (a), etc.) can be merged with their parent.
+    """
+    first_line = text.split("\n", 1)[0].strip()
+
+    if _RE_ARTICLE.match(first_line):
+        return True
+    if _RE_ALLCAPS_HEADING.match(first_line):
+        return True
+    if re.match(r"^(?:SECTION|Section)\s+\d+[\\.:]", first_line):
+        return True
+    # Top-level numbered: "5 CONTRACT", "10.", but NOT "4.1.2" or "13.2.1"
+    if _RE_TOP_LEVEL_NUMBERED.match(first_line) and "." not in first_line.split()[0]:
+        return True
+    return False
+
+
 def _split_at_sections(text: str) -> list[str]:
     """Phase 1: Split text at every section header unconditionally.
 
@@ -233,9 +257,41 @@ def chunk_document(pages: list[dict]) -> list[dict]:
     section_pieces = _split_at_sections(merged_text)
 
     # Phase 2: Split any oversized section pieces by size (levels 2-5)
-    raw_pieces: list[str] = []
+    size_pieces: list[str] = []
     for piece in section_pieces:
-        raw_pieces.extend(_split_by_size(piece, max_tokens))
+        size_pieces.extend(_split_by_size(piece, max_tokens))
+
+    # Phase 3: Merge small pieces using greedy accumulation.
+    # Walk forward, buffering consecutive pieces until adding the next
+    # would exceed max_tokens. This eliminates tiny fragments while
+    # keeping chunks near max_tokens. Pieces are joined with "\n\n".
+    # Never merge across section boundaries — if a piece starts with a
+    # section header, flush the buffer first and start a new group.
+    raw_pieces: list[str] = []
+    buffer: list[str] = []
+    buffer_tokens = 0
+
+    for piece in size_pieces:
+        piece = piece.strip()
+        if not piece:
+            continue
+
+        starts_new_section = _is_top_level_section(piece)
+        piece_tokens = _token_count(piece)
+        # +1 accounts for the "\n\n" joiner between pieces
+        combined = buffer_tokens + piece_tokens + (1 if buffer else 0)
+
+        # Flush buffer before starting a new section or if combined exceeds limit
+        if buffer and (starts_new_section or combined > max_tokens):
+            raw_pieces.append("\n\n".join(buffer))
+            buffer = [piece]
+            buffer_tokens = piece_tokens
+        else:
+            buffer.append(piece)
+            buffer_tokens = combined
+
+    if buffer:
+        raw_pieces.append("\n\n".join(buffer))
 
     # Build chunks with overlap, section tracking, and page numbers
     chunks: list[dict] = []
