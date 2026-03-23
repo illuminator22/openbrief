@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg
+alembic
+pgvector
+sentence-transformers
+PyMuPDF
+pdfplumber
+python-multipart
+python-dotenv
+pydantic-settings
