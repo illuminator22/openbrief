@@ -97,40 +97,53 @@ def _detect_section_title(text: str) -> str | None:
     return None
 
 
-def _recursive_split(text: str, max_tokens: int) -> list[str]:
-    """Recursively split text into pieces that fit within max_tokens.
+def _split_at_sections(text: str) -> list[str]:
+    """Phase 1: Split text at every section header unconditionally.
+
+    Section boundaries are structural — they always produce separate pieces
+    regardless of size. This ensures every piece belongs to exactly one section.
+    """
+    raw_parts = _SECTION_HEADER_RE.split(text)
+    if len(raw_parts) <= 1:
+        return [text]
+
+    # re.split with a capture group returns: [before, match, after, match, after, ...]
+    # Re-attach each matched header to the text that follows it.
+    pieces: list[str] = []
+    if raw_parts[0].strip():
+        pieces.append(raw_parts[0])
+    for i in range(1, len(raw_parts), 2):
+        matched = raw_parts[i]
+        following = raw_parts[i + 1] if i + 1 < len(raw_parts) else ""
+        pieces.append(matched + following)
+
+    return [p for p in pieces if p.strip()]
+
+
+def _split_by_size(text: str, max_tokens: int) -> list[str]:
+    """Phase 2: Recursively split text into pieces that fit within max_tokens.
+
+    Uses only size-based separators (no section headers — those are
+    handled by _split_at_sections before this is called).
 
     Splitting hierarchy:
-        1. Legal section headers
-        2. Paragraph breaks (double newlines)
-        3. Single newlines
-        4. Sentence boundaries
-        5. Spaces (last resort)
+        1. Paragraph breaks (double newlines)
+        2. Single newlines
+        3. Sentence boundaries
+        4. Spaces (last resort, never mid-word)
     """
     if _token_count(text) <= max_tokens:
         return [text]
 
-    # Try each split level in order
-    separators = [
-        _SECTION_HEADER_RE,  # Level 1: legal headers
-        r"\n\n",             # Level 2: paragraph breaks
-        r"\n",               # Level 3: single newlines
-        _RE_SENTENCE,        # Level 4: sentence boundaries
+    separators: list[str | re.Pattern[str]] = [
+        r"\n\n",         # Level 1: paragraph breaks
+        r"\n",           # Level 2: single newlines
+        _RE_SENTENCE,    # Level 3: sentence boundaries
     ]
 
     for sep in separators:
         if isinstance(sep, re.Pattern):
-            # re.split with a capture group preserves matched text in results.
-            # Results alternate: [before, match, after, match, after, ...]
-            # Re-attach each matched header to the text that follows it.
-            raw_parts = sep.split(text)
-            if len(raw_parts) <= 1:
-                continue
-            parts = [raw_parts[0]] if raw_parts[0].strip() else []
-            for i in range(1, len(raw_parts), 2):
-                matched = raw_parts[i]
-                following = raw_parts[i + 1] if i + 1 < len(raw_parts) else ""
-                parts.append(matched + following)
+            parts = sep.split(text)
         else:
             parts = text.split(sep)
 
@@ -140,7 +153,6 @@ def _recursive_split(text: str, max_tokens: int) -> list[str]:
         # Re-join small parts and recursively split large ones
         result: list[str] = []
         current = parts[0]
-
         joiner = "" if isinstance(sep, re.Pattern) else sep
 
         for part in parts[1:]:
@@ -149,16 +161,16 @@ def _recursive_split(text: str, max_tokens: int) -> list[str]:
                 current = candidate
             else:
                 if current.strip():
-                    result.extend(_recursive_split(current, max_tokens))
+                    result.extend(_split_by_size(current, max_tokens))
                 current = part
 
         if current.strip():
-            result.extend(_recursive_split(current, max_tokens))
+            result.extend(_split_by_size(current, max_tokens))
 
         if len(result) > 1 or (len(result) == 1 and _token_count(result[0]) <= max_tokens):
             return result
 
-    # Level 5: split at spaces (last resort, never mid-word)
+    # Level 4: split at spaces (last resort, never mid-word)
     pieces: list[str] = []
     remaining = text
     while remaining:
@@ -217,8 +229,13 @@ def chunk_document(pages: list[dict]) -> list[dict]:
     merged_text = "\n\n".join(page["text"] for page in pages)
     page_index = _build_page_index(pages)
 
-    # Recursively split into pieces that fit within max_tokens
-    raw_pieces = _recursive_split(merged_text, max_tokens)
+    # Phase 1: Split at section headers unconditionally (structural split)
+    section_pieces = _split_at_sections(merged_text)
+
+    # Phase 2: Split any oversized section pieces by size (levels 2-5)
+    raw_pieces: list[str] = []
+    for piece in section_pieces:
+        raw_pieces.extend(_split_by_size(piece, max_tokens))
 
     # Build chunks with overlap, section tracking, and page numbers
     chunks: list[dict] = []
@@ -243,8 +260,10 @@ def chunk_document(pages: list[dict]) -> list[dict]:
 
         page_num = _page_at_offset(page_index, piece_start)
 
-        # Apply overlap: prepend tail of previous chunk
-        if overlap_tokens > 0 and chunks:
+        # Apply overlap: prepend tail of previous chunk.
+        # Only apply within the same section — never pull text across a section boundary.
+        is_new_section = detected is not None
+        if overlap_tokens > 0 and chunks and not is_new_section:
             prev_content = chunks[-1]["content"]
             prev_tokens = _ENCODING.encode(prev_content)
             if len(prev_tokens) > overlap_tokens:
