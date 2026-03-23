@@ -20,9 +20,10 @@ _ENCODING = tiktoken.get_encoding("cl100k_base")
 # ARTICLE I, ARTICLE II, ARTICLE IV, etc.
 _RE_ARTICLE = re.compile(r"^ARTICLE\s+[IVXLCDM]+\.?", re.MULTILINE)
 
-# Section 1., Section 1:, SECTION 1., numbered like 1. / 1.1 / 1.1.1 at start of line
+# Section 1., Section 1:, SECTION 1., numbered like 1. / 1.1 / 1.1.1 at start of line,
+# or top-level numbers without period like "5 CONTRACT ADMINISTRATION:"
 _RE_SECTION_NUMBERED = re.compile(
-    r"^(?:(?:SECTION|Section)\s+\d+[\.:])|\d+(?:\.\d+)*\.", re.MULTILINE
+    r"^(?:(?:SECTION|Section)\s+\d+[\.:])|\d+(?:\.\d+)*\.|\d+\s+[A-Z]", re.MULTILINE
 )
 
 # (a), (b), (i), (ii) at start of line
@@ -41,6 +42,7 @@ _SECTION_HEADER_RE = re.compile(
     r"^ARTICLE\s+[IVXLCDM]+\.?"
     r"|^(?:SECTION|Section)\s+\d+[\.:]"
     r"|^\d+(?:\.\d+)*\."
+    r"|^\d+\s+[A-Z]"
     r"|^\([a-z]+\)"
     r"|^\([ivxlcdm]+\)"
     r"|^[A-Z][A-Z \-:,;/&]{3,}$"
