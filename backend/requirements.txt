@@ -6,6 +6,7 @@ alembic
 pgvector
 sentence-transformers
 PyMuPDF
+pymupdf4llm
 pdfplumber
 python-multipart
 python-dotenv

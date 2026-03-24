@@ -1,7 +1,8 @@
 """Legal-aware recursive document chunker.
 
 Splits parsed PDF pages into token-bounded chunks while respecting
-legal document structure (section headers, clauses, paragraphs).
+legal document structure. Input is markdown from pymupdf4llm, where
+section headings are marked with ## — making detection reliable.
 Uses tiktoken for accurate token counting.
 
 This is a custom chunker — LangChain text splitters are not used here.
@@ -15,40 +16,8 @@ from config import settings
 
 _ENCODING = tiktoken.get_encoding("cl100k_base")
 
-# --- Section header patterns (compiled once) ---
-
-# ARTICLE I, ARTICLE II, ARTICLE IV, etc.
-_RE_ARTICLE = re.compile(r"^ARTICLE\s+[IVXLCDM]+\.?", re.MULTILINE)
-
-# Section 1., Section 1:, SECTION 1., numbered like 1. / 1.1 / 1.1.1 at start of line,
-# or top-level numbers without period like "5 CONTRACT ADMINISTRATION:"
-_RE_SECTION_NUMBERED = re.compile(
-    r"^(?:(?:SECTION|Section)\s+\d+[\.:])|\d+(?:\.\d+)*\.|\d+\s+[A-Z]", re.MULTILINE
-)
-
-# (a), (b), (i), (ii) at start of line
-_RE_LETTERED_CLAUSE = re.compile(
-    r"^\([a-z]+\)|^\([ivxlcdm]+\)", re.MULTILINE
-)
-
-# ALL-CAPS lines that look like headings (at least 2 words, all uppercase letters/spaces/punctuation)
-_RE_ALLCAPS_HEADING = re.compile(r"^[A-Z][A-Z \-:,;/&]{3,}$", re.MULTILINE)
-
-# Combined pattern that matches any section header.
-# Uses a capture group so re.split() preserves the matched header in results.
-# All alternatives are ^-anchored to prevent mid-sentence false matches.
-_SECTION_HEADER_RE = re.compile(
-    r"("
-    r"^ARTICLE\s+[IVXLCDM]+\.?"
-    r"|^(?:SECTION|Section)\s+\d+[\.:]"
-    r"|^\d+(?:\.\d+)*\."
-    r"|^\d+\s+[A-Z]"
-    r"|^\([a-z]+\)"
-    r"|^\([ivxlcdm]+\)"
-    r"|^[A-Z][A-Z \-:,;/&]{3,}$"
-    r")",
-    re.MULTILINE,
-)
+# Markdown heading pattern: lines starting with # (one or more)
+_RE_MD_HEADING = re.compile(r"^#{1,6}\s+", re.MULTILINE)
 
 # Sentence boundary: period/question mark/exclamation followed by space(s) and uppercase letter
 _RE_SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
@@ -69,70 +38,63 @@ def _token_split_at_boundary(text: str, max_tokens: int) -> tuple[str, str]:
     if len(tokens) <= max_tokens:
         return text, ""
 
-    # Decode the first max_tokens tokens, then find the last space
     truncated = _ENCODING.decode(tokens[:max_tokens])
     last_space = truncated.rfind(" ")
 
     if last_space <= 0:
-        # No space found — take the whole truncated portion
         return truncated, text[len(truncated):]
 
     return truncated[:last_space], text[last_space + 1:]
 
 
-def _detect_section_title(text: str) -> str | None:
-    """Detect if text starts with a legal section header.
+def _extract_heading_text(line: str) -> str:
+    """Extract the plain text from a markdown heading line.
 
-    Returns the header line if found, otherwise None.
+    '## **5 CONTRACT ADMINISTRATION:**' -> '5 CONTRACT ADMINISTRATION:'
+    """
+    # Strip leading #s and whitespace
+    text = re.sub(r"^#{1,6}\s+", "", line).strip()
+    # Strip bold markers
+    text = text.replace("**", "").strip()
+    return text
+
+
+def _detect_section_title(text: str) -> str | None:
+    """Detect if text starts with a markdown heading.
+
+    Returns the heading text (without ## and **) if found, otherwise None.
     """
     first_line = text.split("\n", 1)[0].strip()
-
-    if _RE_ARTICLE.match(first_line):
-        return first_line
-    if _RE_SECTION_NUMBERED.match(first_line):
-        return first_line
-    if _RE_ALLCAPS_HEADING.match(first_line):
-        return first_line
-    # Lettered clauses like (a) are sub-sections, not top-level titles
+    if _RE_MD_HEADING.match(first_line):
+        return _extract_heading_text(first_line)
     return None
 
 
-# Top-level section patterns: ARTICLE X, "5 CONTRACT:", "Section 5.", ALL-CAPS headings.
-# Sub-sections like 4.1.2, 13.2.1, (a), (b) are NOT top-level.
-_RE_TOP_LEVEL_NUMBERED = re.compile(r"^\d+(?:\s+[A-Z]|[\.:])")
-
 def _is_top_level_section(text: str) -> bool:
-    """Check if text starts with a top-level section header.
+    """Check if text starts with a top-level markdown heading.
 
     Top-level sections act as merge boundaries in Phase 3.
-    Sub-sections (4.1.2, (a), etc.) can be merged with their parent.
+    A heading is top-level if it's a ## heading (the level pymupdf4llm
+    uses for document sections). Sub-section content without headings
+    can be merged freely.
     """
     first_line = text.split("\n", 1)[0].strip()
-
-    if _RE_ARTICLE.match(first_line):
-        return True
-    if _RE_ALLCAPS_HEADING.match(first_line):
-        return True
-    if re.match(r"^(?:SECTION|Section)\s+\d+[\\.:]", first_line):
-        return True
-    # Top-level numbered: "5 CONTRACT", "10.", but NOT "4.1.2" or "13.2.1"
-    if _RE_TOP_LEVEL_NUMBERED.match(first_line) and "." not in first_line.split()[0]:
-        return True
-    return False
+    return bool(_RE_MD_HEADING.match(first_line))
 
 
 def _split_at_sections(text: str) -> list[str]:
-    """Phase 1: Split text at every section header unconditionally.
+    """Phase 1: Split text at every markdown heading unconditionally.
 
     Section boundaries are structural — they always produce separate pieces
     regardless of size. This ensures every piece belongs to exactly one section.
     """
-    raw_parts = _SECTION_HEADER_RE.split(text)
+    # Split at markdown headings, using a capture group to preserve the heading
+    raw_parts = re.split(r"(^#{1,6}\s+.*$)", text, flags=re.MULTILINE)
+
     if len(raw_parts) <= 1:
         return [text]
 
-    # re.split with a capture group returns: [before, match, after, match, after, ...]
-    # Re-attach each matched header to the text that follows it.
+    # Re-attach each heading to the text that follows it
     pieces: list[str] = []
     if raw_parts[0].strip():
         pieces.append(raw_parts[0])
@@ -174,7 +136,6 @@ def _split_by_size(text: str, max_tokens: int) -> list[str]:
         if len(parts) <= 1:
             continue
 
-        # Re-join small parts and recursively split large ones
         result: list[str] = []
         current = parts[0]
         joiner = "" if isinstance(sep, re.Pattern) else sep
@@ -231,6 +192,11 @@ def _page_at_offset(page_index: list[tuple[int, int]], char_offset: int) -> int:
 def chunk_document(pages: list[dict]) -> list[dict]:
     """Split parsed PDF pages into legal-aware, token-bounded chunks.
 
+    Three-phase pipeline:
+        Phase 1: Split at markdown headings (structural, unconditional)
+        Phase 2: Split oversized pieces by size (paragraphs, newlines, sentences)
+        Phase 3: Merge small pieces greedily (never across heading boundaries)
+
     Args:
         pages: Output from pdf_parser — [{"page_number": int, "text": str}, ...]
 
@@ -253,10 +219,10 @@ def chunk_document(pages: list[dict]) -> list[dict]:
     merged_text = "\n\n".join(page["text"] for page in pages)
     page_index = _build_page_index(pages)
 
-    # Phase 1: Split at section headers unconditionally (structural split)
+    # Phase 1: Split at markdown headings unconditionally (structural split)
     section_pieces = _split_at_sections(merged_text)
 
-    # Phase 2: Split any oversized section pieces by size (levels 2-5)
+    # Phase 2: Split any oversized section pieces by size (levels 1-4)
     size_pieces: list[str] = []
     for piece in section_pieces:
         size_pieces.extend(_split_by_size(piece, max_tokens))
@@ -265,8 +231,8 @@ def chunk_document(pages: list[dict]) -> list[dict]:
     # Walk forward, buffering consecutive pieces until adding the next
     # would exceed max_tokens. This eliminates tiny fragments while
     # keeping chunks near max_tokens. Pieces are joined with "\n\n".
-    # Never merge across section boundaries — if a piece starts with a
-    # section header, flush the buffer first and start a new group.
+    # Never merge across heading boundaries — if a piece starts with a
+    # markdown heading, flush the buffer first and start a new group.
     raw_pieces: list[str] = []
     buffer: list[str] = []
     buffer_tokens = 0
@@ -303,7 +269,7 @@ def chunk_document(pages: list[dict]) -> list[dict]:
         if not piece:
             continue
 
-        # Detect section title
+        # Detect section title from markdown heading
         detected = _detect_section_title(piece)
         if detected is not None:
             current_section = detected
@@ -324,7 +290,6 @@ def chunk_document(pages: list[dict]) -> list[dict]:
             prev_tokens = _ENCODING.encode(prev_content)
             if len(prev_tokens) > overlap_tokens:
                 overlap_text = _ENCODING.decode(prev_tokens[-overlap_tokens:])
-                # Find a clean word boundary in the overlap
                 first_space = overlap_text.find(" ")
                 if first_space > 0:
                     overlap_text = overlap_text[first_space + 1:]
@@ -332,7 +297,6 @@ def chunk_document(pages: list[dict]) -> list[dict]:
             else:
                 piece_with_overlap = prev_content + " " + piece
 
-            # Trim if overlap pushed us over the limit
             if _token_count(piece_with_overlap) > max_tokens:
                 piece_with_overlap = piece
         else:

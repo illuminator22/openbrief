@@ -1,7 +1,10 @@
-"""PDF text extraction using PyMuPDF (fitz).
+"""PDF text extraction using PyMuPDF4LLM.
 
-Future enhancement: use pdfplumber for table extraction from pages
-that contain structured tabular data. For now, fitz handles all text.
+Uses pymupdf4llm's layout analysis mode to extract text as Markdown
+with automatic header/footer stripping. Section headings are output
+as ## markdown headings, which the chunker uses for section detection.
+
+Future enhancement: pdfplumber for table extraction on table-heavy pages.
 """
 
 import logging
@@ -9,101 +12,54 @@ import re
 from pathlib import Path
 
 import fitz  # PyMuPDF
+import pymupdf4llm
 
 logger = logging.getLogger(__name__)
 
 
-def _clean_text(raw: str) -> str:
-    """Strip excessive whitespace while preserving paragraph breaks.
+def _strip_repeating_headings(pages: list[dict]) -> list[dict]:
+    """Strip markdown headings that repeat across most pages.
 
-    Collapses runs of 3+ newlines to double newlines, and collapses
-    runs of spaces/tabs within lines to a single space.
+    pymupdf4llm strips plain-text headers/footers via header=False/footer=False,
+    but repeating section-styled headings (e.g., a document title that appears
+    as ## on every page) survive. This catches those by comparing heading lines
+    across pages and removing any that appear on more than half the pages.
     """
-    # Normalize line endings
-    text = raw.replace("\r\n", "\n").replace("\r", "\n")
-    # Collapse horizontal whitespace (spaces/tabs) within lines
-    text = re.sub(r"[^\S\n]+", " ", text)
-    # Collapse 3+ consecutive newlines to exactly 2
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    # Strip leading/trailing whitespace per line
-    lines = [line.strip() for line in text.split("\n")]
-    text = "\n".join(lines)
-    # Strip leading/trailing whitespace from the whole result
-    return text.strip()
-
-
-# Number of lines to inspect at the top/bottom of each page for repeating headers/footers
-_HEADER_FOOTER_LINES = 3
-# A line must appear on this fraction of pages (at the same position) to be considered repeating
-_REPEAT_THRESHOLD = 0.5
-# Minimum number of pages required before header/footer stripping kicks in
-_MIN_PAGES_FOR_STRIPPING = 3
-
-
-def _strip_repeating_headers_footers(pages: list[dict]) -> list[dict]:
-    """Detect and remove repeating headers and footers from page text.
-
-    Looks at the first and last few lines of each page. If the same line
-    appears in the same position (top or bottom) on more than half the pages,
-    it's treated as a repeating header/footer and stripped from all pages.
-    """
-    if len(pages) < _MIN_PAGES_FOR_STRIPPING:
+    if len(pages) < 3:
         return pages
 
-    threshold = max(3, int(len(pages) * _REPEAT_THRESHOLD))
-
-    # Split each page into lines
-    page_lines = [p["text"].split("\n") for p in pages]
-
-    # Collect candidate lines by position
-    # top_lines[i] = counter of line text at position i from the top
     from collections import Counter
 
-    top_counts: dict[tuple[int, str], int] = Counter()
-    bottom_counts: dict[tuple[int, str], int] = Counter()
+    threshold = max(3, int(len(pages) * 0.5))
 
-    for lines in page_lines:
-        for i in range(min(_HEADER_FOOTER_LINES, len(lines))):
-            stripped = lines[i].strip()
-            if stripped:
-                top_counts[(i, stripped)] += 1
+    # Count how many pages each heading line appears on
+    heading_counts: Counter[str] = Counter()
+    for page in pages:
+        # Deduplicate within a single page
+        seen: set[str] = set()
+        for line in page["text"].split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("#") and stripped not in seen:
+                seen.add(stripped)
+                heading_counts[stripped] += 1
 
-        for i in range(min(_HEADER_FOOTER_LINES, len(lines))):
-            idx = len(lines) - 1 - i
-            if idx >= 0:
-                stripped = lines[idx].strip()
-                if stripped:
-                    bottom_counts[(i, stripped)] += 1
+    repeating = {h for h, count in heading_counts.items() if count >= threshold}
 
-    # Find lines that repeat across enough pages
-    repeating_top: set[str] = set()
-    repeating_bottom: set[str] = set()
-
-    for (pos, text), count in top_counts.items():
-        if count >= threshold:
-            repeating_top.add(text)
-            logger.info("Detected repeating header: '%s' (appears on %d pages)", text, count)
-
-    for (pos, text), count in bottom_counts.items():
-        if count >= threshold:
-            repeating_bottom.add(text)
-            logger.info("Detected repeating footer: '%s' (appears on %d pages)", text, count)
-
-    if not repeating_top and not repeating_bottom:
+    if not repeating:
         return pages
 
-    repeating_all = repeating_top | repeating_bottom
+    for h in repeating:
+        logger.info("Stripping repeating heading: '%s' (appears on %d+ pages)", h, threshold)
 
-    # Strip repeating lines from all pages
     result: list[dict] = []
     for page in pages:
         lines = page["text"].split("\n")
-        filtered = [line for line in lines if line.strip() not in repeating_all]
+        filtered = [line for line in lines if line.strip() not in repeating]
         cleaned = "\n".join(filtered).strip()
 
         if not cleaned:
             logger.warning(
-                "Page %d is empty after stripping headers/footers, skipping.",
+                "Page %d is empty after stripping repeating headings, skipping.",
                 page["page_number"],
             )
             continue
@@ -116,20 +72,38 @@ def _strip_repeating_headers_footers(pages: list[dict]) -> list[dict]:
     return result
 
 
-def _extract_pages(doc: fitz.Document) -> list[dict]:
-    """Extract text from each page of an opened fitz document.
+def _clean_markdown(text: str) -> str:
+    """Clean up pymupdf4llm markdown output.
+
+    Removes image placeholders, collapses excessive blank lines,
+    and strips trailing whitespace.
+    """
+    # Remove image placeholder lines
+    text = re.sub(r"^.*intentionally omitted.*$", "", text, flags=re.MULTILINE)
+    # Collapse 3+ consecutive newlines to exactly 2
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _extract_pages_from_doc(doc: fitz.Document) -> list[dict]:
+    """Extract markdown text from each page using pymupdf4llm layout analysis.
 
     Returns:
-        List of dicts with 'page_number' (1-indexed) and 'text'.
+        List of dicts with 'page_number' (1-indexed) and 'text' (markdown).
         Pages with no extractable text are skipped with a warning.
     """
-    pages: list[dict] = []
-    for i in range(len(doc)):
-        page = doc[i]
-        raw_text = page.get_text("text")
-        cleaned = _clean_text(raw_text)
+    page_chunks = pymupdf4llm.to_markdown(
+        doc,
+        page_chunks=True,
+        header=False,
+        footer=False,
+    )
 
-        if not cleaned:
+    pages: list[dict] = []
+    for i, chunk in enumerate(page_chunks):
+        text = _clean_markdown(chunk["text"])
+
+        if not text:
             logger.warning(
                 "Page %d has no extractable text (possibly image-only), skipping.",
                 i + 1,
@@ -138,10 +112,10 @@ def _extract_pages(doc: fitz.Document) -> list[dict]:
 
         pages.append({
             "page_number": i + 1,
-            "text": cleaned,
+            "text": text,
         })
 
-    return _strip_repeating_headers_footers(pages)
+    return _strip_repeating_headings(pages)
 
 
 def parse_pdf_from_path(path: str | Path) -> list[dict]:
@@ -155,7 +129,7 @@ def parse_pdf_from_path(path: str | Path) -> list[dict]:
     """
     doc = fitz.open(str(path))
     try:
-        return _extract_pages(doc)
+        return _extract_pages_from_doc(doc)
     finally:
         doc.close()
 
@@ -171,6 +145,6 @@ def parse_pdf_from_bytes(content: bytes) -> list[dict]:
     """
     doc = fitz.open(stream=content, filetype="pdf")
     try:
-        return _extract_pages(doc)
+        return _extract_pages_from_doc(doc)
     finally:
         doc.close()

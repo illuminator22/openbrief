@@ -53,7 +53,23 @@ This document tracks every "do this later" or "future enhancement" mentioned dur
 - **Why deferred:** Recursive splitting at 512 tokens with legal-aware section boundaries is the proven baseline (validated by benchmarks showing 69% accuracy for recursive 512-token splitting). Fancier methods add complexity without guaranteed improvement.
 - **When to do it:** After Phase 2 evaluation metrics are established. If retrieval precision is below 85%, try semantic chunking first. If cross-reference questions fail, try contextual retrieval (prepending summaries).
 
-### 6.5. Merge Small Chunks Within Sections
+### 6.5. Document Title Lines Creating Tiny Noise Chunks
+- **When mentioned:** Day 4 (chunker testing on real PDF)
+- **What:** Document title lines like "State of California" (3 tokens), "MASTER SERVICES AGREEMENT CONTRACT 5-14-88-01" (15 tokens) get detected as ALL-CAPS section headers. Since they're top-level, they can't merge with the next chunk and end up as tiny useless fragments. These aren't real sections — they're document metadata.
+- **Why deferred:** Doesn't break anything, just wastes a few chunk slots. The embedding model can handle short text and these won't match real legal queries anyway.
+- **When to do it:** Phase 2 if retrieval quality is affected. Options: (a) detect and merge title-page content into a single "document header" chunk before Phase 1 splitting, or (b) add a minimum token threshold that forces merge even across top-level boundaries for very short pieces (e.g., under 20 tokens).
+
+### 6.6. Varying Page Headers/Footers Not Caught by Repeating Stripper
+- **When mentioned:** Day 4 (chunker testing on real PDF)
+- **What:** The repeating header/footer stripper requires exact text matches. Address blocks like "707 Third Street, 2nd Floor" and "707 Third Street, 1st Floor, Room 400" appear on different pages but with slight variations (different floor, different suite). They aren't stripped and end up as chunk content or section titles. Chunk 23 in the test doc also mixed an address block with section 18.2 content.
+- **Downstream impact:** Unstripped page headers cause two cascading problems in the chunker:
+  - **Cross-section chunks:** When a page header line sits between two sections in the parsed text, the top-level section detection can miss the boundary. In the test doc, chunk 6 spans sections 4.5 through 6.1.2 (Provider Qualifications → Contract Administration → Licenses) because the page header broke the line positioning. These are different topics that should not share a chunk.
+  - **Garbage section labels:** Chunks that start with an unstripped address line (e.g., "707 Third Street, 1st Floor, Room 400") get that address as their section_title. Chunk 8 in the test doc absorbed sections 6.1.7 through 7.1.3 under this garbage label.
+- **Why deferred:** Ivan asked to fix this during Day 4 chunker testing but was advised to wait until Phase 2 retrieval evaluation to confirm it actually hurts search quality. The content itself is all present and correct — it's the grouping and labeling that's imperfect on these edge cases. If "what are the license requirements?" fails to retrieve section 6 because it's mislabeled, that's when to fix it.
+- **When to do it:** Phase 2 if retrieval precision is affected. This is the root cause — fixing the header stripping fixes both downstream problems.
+- **Options:** (a) fuzzy matching in `_strip_repeating_headers_footers` using edit distance or token overlap instead of exact string match, (b) detect common address/phone/fax patterns and strip them as boilerplate, (c) strip lines matching "Contract \d+-\d+-\d+-\d+", "REV \d+/\d+/\d+", "Page \d+ of \d+" as known document boilerplate patterns.
+
+### 6.7 Merge Small Chunks Within Sections
 - **When mentioned:** Day 4 (two-phase chunker design)
 - **What:** The two-phase chunker splits unconditionally at every section header, then splits oversized pieces by size. This means very short sections (e.g., a 30-token "Governing Law" clause) become tiny standalone chunks. Tiny chunks have less semantic signal for cosine similarity retrieval.
 - **Why deferred:** Real legal sections are rarely that short (usually 50-100+ tokens), and a correctly-labeled small chunk is far more useful than a large chunk spanning two sections with the wrong label. The tradeoff favors correctness over size optimization.
