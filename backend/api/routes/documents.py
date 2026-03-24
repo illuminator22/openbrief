@@ -188,6 +188,29 @@ async def get_document(
     )
 
 
+@router.delete("/{document_id}", status_code=204)
+async def delete_document(
+    document_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """Delete a document and all its chunks.
+
+    Cascading delete removes chunks, entities, and analyses automatically.
+    Also removes the PDF file from disk.
+    """
+    document = await db.get(Document, document_id)
+    if document is None or document.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Delete file from disk
+    file_path = Path(settings.upload_dir) / f"{document.id}.pdf"
+    file_path.unlink(missing_ok=True)
+
+    await db.delete(document)
+    await db.flush()
+
+
 class ChunkSearchResult(BaseModel):
     """A single chunk result from similarity search."""
 
