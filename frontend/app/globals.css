@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+:root {
+  /* Claude-inspired warm dark theme */
+  --background: #2b2a27;
+  --foreground: #eeeeee;
+  --muted: #9a9893;
+  --sidebar-bg: #1f1e1b;
+  --sidebar-text: #9a9893;
+  --sidebar-active: #eeeeee;
+  --sidebar-hover: #353430;
+  --accent: #D97757;
+  --accent-hover: #c4633a;
+  --accent-dark: #ae5630;
+  --surface: #353430;
+  --surface-light: #3d3c38;
+  --border: rgba(255, 255, 255, 0.08);
+  --input-bg: #1f1e1b;
+  --success: #1D9E75;
+  --error: #E24B4A;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-muted: var(--muted);
+  --color-surface: var(--surface);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Serif font for content/reading areas — matches Claude's literary feel */
+.font-content {
+  font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+}

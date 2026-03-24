@@ -9,7 +9,7 @@ Users upload legal documents (contracts, briefs, case filings) and a team of AI 
 ## Tech Stack
 
 - **Backend:** Python 3.11+, FastAPI, SQLAlchemy 2.0 (async), PostgreSQL + pgvector
-- **Frontend:** Next.js, TypeScript, Tailwind CSS *(not yet started)*
+- **Frontend:** Next.js 16 (App Router), TypeScript (strict), Tailwind CSS
 - **Embeddings:** Sentence Transformers (bge-small-en-v1.5)
 - **PDF Parsing:** PyMuPDF, pdfplumber
 
@@ -58,7 +58,7 @@ openbrief/
 │   │   └── evaluation/      # DeepEval RAG evaluation
 │   ├── db/                  # SQLAlchemy models, database connection
 │   └── mcp/                 # MCP server
-├── frontend/                # Next.js app (not yet started)
+├── frontend/                # Next.js 16 app (TypeScript, Tailwind)
 ├── training/                # QLoRA fine-tuning scripts
 ├── docs/                    # Architecture and setup docs
 └── tests/

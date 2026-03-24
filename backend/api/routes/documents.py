@@ -8,6 +8,7 @@ from pathlib import Path
 import fitz  # PyMuPDF
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.exceptions import DocumentValidationError
@@ -16,7 +17,7 @@ from config import settings
 from core.ingestion.pipeline import ingest_document
 from core.rag.retriever import retrieve_chunks
 from db.database import get_db
-from db.models import Document, User
+from db.models import Chunk, Document, User
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,70 @@ async def upload_document(
         await db.refresh(document)
 
     return DocumentResponse.model_validate(document)
+
+
+class DocumentListResponse(BaseModel):
+    """Response schema for document list."""
+
+    documents: list[DocumentResponse]
+
+
+class DocumentDetailResponse(BaseModel):
+    """Response schema for single document with chunk count."""
+
+    id: uuid.UUID
+    filename: str
+    file_size: int
+    page_count: int | None
+    upload_status: str
+    created_at: datetime
+    chunk_count: int
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("/", response_model=DocumentListResponse)
+async def list_documents(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DocumentListResponse:
+    """List all documents for the current user, newest first."""
+    stmt = (
+        select(Document)
+        .where(Document.user_id == current_user.id)
+        .order_by(Document.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    documents = result.scalars().all()
+    return DocumentListResponse(
+        documents=[DocumentResponse.model_validate(d) for d in documents]
+    )
+
+
+@router.get("/{document_id}", response_model=DocumentDetailResponse)
+async def get_document(
+    document_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DocumentDetailResponse:
+    """Get details for a single document including chunk count."""
+    document = await db.get(Document, document_id)
+    if document is None or document.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Count chunks for this document
+    count_stmt = select(func.count()).where(Chunk.document_id == document_id)
+    chunk_count = await db.scalar(count_stmt) or 0
+
+    return DocumentDetailResponse(
+        id=document.id,
+        filename=document.filename,
+        file_size=document.file_size,
+        page_count=document.page_count,
+        upload_status=document.upload_status,
+        created_at=document.created_at,
+        chunk_count=chunk_count,
+    )
 
 
 class ChunkSearchResult(BaseModel):
