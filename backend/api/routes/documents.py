@@ -1,19 +1,24 @@
 """Document upload and management endpoints."""
 
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 import fitz  # PyMuPDF
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.exceptions import DocumentValidationError
 from api.routes.auth import get_current_user
 from config import settings
+from core.ingestion.pipeline import ingest_document
+from core.rag.retriever import retrieve_chunks
 from db.database import get_db
 from db.models import Document, User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -106,4 +111,70 @@ async def upload_document(
     file_path = upload_dir / f"{document.id}.pdf"
     file_path.write_bytes(content)
 
+    # Run ingestion pipeline: parse → chunk → embed → store
+    try:
+        await ingest_document(document.id, db)
+    except Exception:
+        logger.exception("Ingestion failed for document %s", document.id)
+        # ingest_document already sets status to "failed" internally,
+        # but refresh the object to return the current status
+        await db.refresh(document)
+
     return DocumentResponse.model_validate(document)
+
+
+class ChunkSearchResult(BaseModel):
+    """A single chunk result from similarity search."""
+
+    chunk_id: uuid.UUID
+    content: str
+    section_title: str | None
+    page_number: int | None
+    chunk_index: int
+    similarity_score: float
+
+
+class SearchResponse(BaseModel):
+    """Response schema for document search."""
+
+    query: str
+    document_id: uuid.UUID
+    results: list[ChunkSearchResult]
+
+
+@router.get("/{document_id}/search", response_model=SearchResponse)
+async def search_document(
+    document_id: uuid.UUID,
+    q: str = Query(..., min_length=1, description="Search query"),
+    top_k: int = Query(default=settings.rag_top_k, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SearchResponse:
+    """Search a document's chunks by semantic similarity.
+
+    Embeds the query and retrieves the most relevant chunks
+    using pgvector cosine distance search.
+    """
+    # Verify document exists and belongs to current user
+    document = await db.get(Document, document_id)
+    if document is None or document.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if document.upload_status != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Document is not ready for search (status: {document.upload_status})",
+        )
+
+    results = await retrieve_chunks(
+        query=q,
+        document_id=document_id,
+        db=db,
+        top_k=top_k,
+    )
+
+    return SearchResponse(
+        query=q,
+        document_id=document_id,
+        results=[ChunkSearchResult(**r) for r in results],
+    )
