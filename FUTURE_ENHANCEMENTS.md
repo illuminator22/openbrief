@@ -21,9 +21,10 @@ This document tracks every "do this later" or "future enhancement" mentioned dur
 - **Why deferred:** Works fine on Python 3.10/3.11 (what the droplet runs). Not urgent.
 - **When to do it:** When upgrading to Python 3.12+. Replace with `datetime.now(datetime.UTC)`.
 
-### 3. Droplet RAM Upgrade Consideration
-- **When mentioned:** Day 2 (PyTorch install)
-- **What:** Upgraded from 2GB to 4GB RAM to install dependencies. Sentence Transformers + PyTorch + Uvicorn will use significant memory.
+### 3. Droplet RAM/CPU Monitoring
+- **When mentioned:** Day 2 (PyTorch install), updated Day 5 (ingestion benchmarks)
+- **Current spec:** Basic / 4 GB RAM / 2 vCPUs (DigitalOcean)
+- **What:** Sentence Transformers + PyTorch + Uvicorn use significant memory. The embedding model alone consumes ~1-1.5GB.
 - **When to revisit:** Monitor memory usage during Phase 2 when the embedding model is loaded at startup. If the model + FastAPI + PostgreSQL connections exceed ~3GB, consider upgrading to 8GB or offloading embedding to a background worker.
 
 ---
@@ -93,11 +94,27 @@ This document tracks every "do this later" or "future enhancement" mentioned dur
 - **What:** BGE model uses the prefix `"Represent this sentence for searching relevant passages: "` for search queries but NOT for document chunks. This was corrected in the project docs during learning.
 - **When to verify:** Day 5 when building the embedder. Double-check that `embed_chunks()` does NOT use the prefix and `embed_query()` DOES use it.
 
+### 11.5 Ingestion Performance on Droplet (2 vCPU / 4GB)
+- **When mentioned:** Day 5 (first real upload test on droplet)
+- **Benchmarks** (10-page CA Master Services Agreement, 37 chunks):
+
+  | Step | Time | % of total |
+  |------|------|------------|
+  | Parsing (pymupdf4llm layout) | 4.17s | 25% |
+  | Chunking | 0.03s | <1% |
+  | Embedding (37 chunks, BGE on CPU) | 11.74s | 72% |
+  | DB storage | 0.38s | 2% |
+  | **Total** | **16.40s** | |
+
+- **Bottleneck 1 — Embedding (72%):** BGE model on CPU, ~0.3s per chunk. No fix without GPU. For a 100-page doc (~80-100 chunks), expect 30-40s.
+- **Bottleneck 2 — Parsing (25%):** pymupdf4llm layout analysis runs an ONNX model per page (~0.4s/page). Tradeoff for better header/footer detection vs raw fitz (~1ms/page).
+- **When to act:** If 100+ page documents need faster processing, move ingestion to a background task (FastAPI BackgroundTasks or Celery/ARQ). The current synchronous approach works for typical legal documents (10-50 pages, 16-60s wait).
+
 ---
 
 ## Deployment & DevOps
 
-### 11.5 Ingestion Pipeline Failure Recovery
+### 11.6 Ingestion Pipeline Failure Recovery
 - **When mentioned:** Day 5 (pipeline implementation)
 - **What:** If the database connection drops during chunk insertion (`db.flush()`), the session is broken and the subsequent attempt to set `upload_status = "failed"` also fails. The document gets stuck on `"processing"` forever. The current double try/except logs the failure but can't persist the status update.
 - **Why deferred:** The scenario (database connection dropping mid-write) is rare in development. Normal errors (bad PDF, empty text, embedding failure) are handled correctly.
