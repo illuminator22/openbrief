@@ -1,7 +1,21 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(python -c \":*)",
+      "Bash(python -m pytest tests/test_ingestion.py -v)",
+      "Bash(printf \"n\\\\nn\\\\n\")",
+      "Bash(npx create-next-app@latest frontend --typescript --tailwind --eslint --app --no-src-dir --import-alias \"@/*\" --use-npm --turbopack)",
+      "Bash(printf \"n\\\\ny\\\\n\")",
+      "Bash(yes \"\")",
+      "WebFetch(domain:www.shadcn.io)",
+      "WebFetch(domain:design-foundations.com)",
+      "WebFetch(domain:deardesigner.substack.com)",
+      "WebFetch(domain:www.color-hex.com)",
+      "Bash(python -m alembic revision -m \"rename api_key_hash to encrypted_llm_key\")",
+      "Bash(python -m alembic revision -m \"add llm_model column and update defaults\")"
     ]
   }
 }

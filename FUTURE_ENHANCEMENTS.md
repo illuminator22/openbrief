@@ -84,6 +84,13 @@ This document tracks every "do this later" or "future enhancement" mentioned dur
 
 ## RAG Pipeline
 
+### 9.5 Streaming Responses for RAG Pipeline
+- **When mentioned:** Phase 2 (RAG pipeline implementation, 2026-03-25)
+- **What:** Currently the RAG pipeline returns the full LLM response in one shot. For a better UX, answers should stream word-by-word as the model generates them. However, streaming and structured JSON don't mix — you can't parse incomplete JSON mid-stream.
+- **Solution:** Stream the answer text for live display in the frontend, then return the full structured JSON (with citations) at the end for citation rendering. Both OpenAI and Anthropic SDKs support streaming.
+- **Why deferred:** The current one-shot approach works fine for Phase 2. Streaming is a UX polish concern.
+- **When to do it:** Phase 6 (frontend polish). Requires changes to: provider.py (add streaming methods), pipeline.py (yield partial responses), analysis route (SSE or WebSocket endpoint), and the frontend (progressive rendering).
+
 ### 10. Chunk Size Tuning
 - **When mentioned:** Day 4 (chunker research), Project plan (Phase 2)
 - **What:** 512 tokens is the starting point based on research, but the optimal size depends on the actual documents and queries. Benchmarks show 512 is a strong default, but some legal documents may benefit from larger chunks (up to 1024).
