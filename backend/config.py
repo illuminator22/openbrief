@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-in-production"
     encryption_key: str = "change-me-in-production"
 
+    # LLM Defaults
+    default_llm_provider: str = "openai"
+    default_llm_model: str = "gpt-4o"
+
     # Entity Extraction
     entity_extraction_backend: str = "prompt"
     entity_model_endpoint: str = ""

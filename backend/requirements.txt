@@ -12,3 +12,6 @@ python-multipart
 python-dotenv
 pydantic-settings
 tiktoken
+cryptography
+openai
+anthropic

@@ -19,3 +19,7 @@ class RAGQueryError(OpenBriefError):
 
 class LLMProviderError(OpenBriefError):
     """Raised when LLM API call fails."""
+
+
+class EncryptionError(OpenBriefError):
+    """Raised when API key encryption or decryption fails."""
