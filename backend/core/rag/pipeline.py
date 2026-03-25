@@ -156,7 +156,9 @@ async def query_document(
     # Step 4: Call LLM
     step_start = time.time()
     try:
-        raw_response = await provider.complete(messages=messages, model=model)
+        raw_response = await provider.complete(
+            messages=messages, model=model, json_mode=True
+        )
     except LLMProviderError:
         raise
     except Exception as exc:

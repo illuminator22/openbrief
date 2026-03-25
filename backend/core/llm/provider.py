@@ -29,6 +29,7 @@ class LLMProvider(ABC):
         model: str,
         temperature: float = 0.0,
         max_tokens: int = 4096,
+        json_mode: bool = False,
     ) -> str:
         """Generate a completion from the LLM.
 
@@ -37,6 +38,7 @@ class LLMProvider(ABC):
             model: Model identifier (e.g., "gpt-4o", "claude-sonnet-4-20250514").
             temperature: Sampling temperature. Defaults to 0.0 for deterministic legal analysis.
             max_tokens: Maximum tokens in the response.
+            json_mode: If True, request structured JSON output from providers that support it.
 
         Returns:
             The model's response text.
@@ -60,15 +62,19 @@ class OpenAIProvider(LLMProvider):
         model: str,
         temperature: float = 0.0,
         max_tokens: int = 4096,
+        json_mode: bool = False,
     ) -> str:
         """Call OpenAI chat completions API."""
         try:
-            response = await self._client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+            kwargs: dict = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            if json_mode:
+                kwargs["response_format"] = {"type": "json_object"}
+            response = await self._client.chat.completions.create(**kwargs)
             content = response.choices[0].message.content
             if content is None:
                 raise LLMProviderError("OpenAI returned empty response")
@@ -98,8 +104,12 @@ class AnthropicProvider(LLMProvider):
         model: str,
         temperature: float = 0.0,
         max_tokens: int = 4096,
+        json_mode: bool = False,
     ) -> str:
         """Call Anthropic messages API.
+
+        Note: json_mode is accepted for interface compatibility but Anthropic
+        does not support native JSON mode. JSON formatting relies on the prompt.
 
         Converts OpenAI-style messages to Anthropic format:
         - Extracts system message separately (Anthropic uses a top-level system param)

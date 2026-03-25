@@ -94,7 +94,13 @@ This document tracks every "do this later" or "future enhancement" mentioned dur
 - **What:** BGE model uses the prefix `"Represent this sentence for searching relevant passages: "` for search queries but NOT for document chunks. This was corrected in the project docs during learning.
 - **When to verify:** Day 5 when building the embedder. Double-check that `embed_chunks()` does NOT use the prefix and `embed_query()` DOES use it.
 
-### 11.5 Ingestion Performance on Droplet (2 vCPU / 4GB)
+### 11.5 Log Retry Costs in RAG Pipeline
+- **When mentioned:** Phase 2 (RAG pipeline implementation)
+- **What:** When the LLM returns invalid JSON, the pipeline retries once with a nudge message. This is a second paid API call with no visibility to the user. The retry is the right tradeoff (a failed parse with no retry would be worse), but costs should be tracked.
+- **Why deferred:** JSON failures should be rare now that OpenAI's `response_format: json_object` is enabled. Anthropic still relies on prompt instructions.
+- **When to do it:** Phase 3 when building the agent trace system. Log retry occurrences and costs in the `agent_trace` JSONB field on the analyses table.
+
+### 11.6 Ingestion Performance on Droplet (2 vCPU / 4GB)
 - **When mentioned:** Day 5 (first real upload test on droplet)
 - **Benchmarks** (10-page CA Master Services Agreement, 37 chunks):
 
