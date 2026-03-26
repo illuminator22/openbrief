@@ -54,11 +54,13 @@ class EvalSummaryResponse(BaseModel):
     """High-level evaluation summary."""
 
     total_evaluations: int
+    model_filter: str | None
     avg_hallucination_score: float | None
     avg_retrieval_precision: float | None
     avg_citation_accuracy: float | None
     avg_answer_relevance: float | None
     avg_response_time_ms: int | None
+    category_averages: dict[str, dict[str, float | None]]
     last_run: str | None
 
 
@@ -163,13 +165,18 @@ async def get_evaluation_results(
 
 @router.get("/summary", response_model=EvalSummaryResponse)
 async def get_evaluation_summary(
+    model: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> EvalSummaryResponse:
     """Get high-level evaluation summary with aggregate metrics.
 
-    Returns overall averages across all evaluation runs.
-    Powers the evaluation dashboard.
+    Supports filtering by model. Returns overall averages and per-category
+    breakdown. Powers the evaluation dashboard.
     """
+    # Build base filter
+    base_filter = EvaluationLog.model_used == model if model else True
+
+    # Overall averages
     stmt = select(
         func.count().label("total"),
         func.avg(EvaluationLog.hallucination_score).label("avg_hallucination"),
@@ -177,21 +184,70 @@ async def get_evaluation_summary(
         func.avg(EvaluationLog.citation_accuracy).label("avg_citation"),
         func.avg(EvaluationLog.answer_relevance).label("avg_relevance"),
         func.avg(EvaluationLog.response_time_ms).label("avg_time"),
-    )
+    ).where(base_filter)
     result = await db.execute(stmt)
     row = result.one()
 
     # Get last run timestamp
-    last_stmt = select(EvaluationLog.created_at).order_by(EvaluationLog.created_at.desc()).limit(1)
+    last_stmt = (
+        select(EvaluationLog.created_at)
+        .where(base_filter)
+        .order_by(EvaluationLog.created_at.desc())
+        .limit(1)
+    )
     last_result = await db.execute(last_stmt)
     last_row = last_result.scalar_one_or_none()
 
+    # Build per-category breakdown by cross-referencing queries with test cases
+    category_averages: dict[str, dict[str, float | None]] = {}
+    try:
+        from core.evaluation.test_cases import get_test_cases
+        test_cases = get_test_cases()
+        # Map question -> category
+        question_to_category: dict[str, str] = {
+            tc["question"]: tc.get("category", "unknown") for tc in test_cases
+        }
+
+        # Load individual logs to compute category averages
+        logs_stmt = select(EvaluationLog).where(base_filter)
+        logs_result = await db.execute(logs_stmt)
+        logs = logs_result.scalars().all()
+
+        cat_scores: dict[str, dict[str, list[float]]] = {}
+        metric_fields = [
+            ("hallucination", "hallucination_score"),
+            ("answer_relevancy", "answer_relevance"),
+            ("faithfulness", "citation_accuracy"),
+            ("contextual_precision", "retrieval_precision"),
+        ]
+
+        for log in logs:
+            category = question_to_category.get(log.query, "unknown")
+            if category not in cat_scores:
+                cat_scores[category] = {m: [] for m, _ in metric_fields}
+
+            for metric_name, db_field in metric_fields:
+                val = getattr(log, db_field)
+                if val is not None:
+                    cat_scores[category][metric_name].append(float(val))
+
+        for category, metrics in cat_scores.items():
+            category_averages[category] = {
+                m: round(sum(s) / len(s), 4) if s else None
+                for m, s in metrics.items()
+            }
+    except Exception:
+        # If test cases aren't configured, skip category breakdown
+        pass
+
     return EvalSummaryResponse(
         total_evaluations=row.total or 0,
+        model_filter=model,
         avg_hallucination_score=round(float(row.avg_hallucination), 4) if row.avg_hallucination else None,
         avg_retrieval_precision=round(float(row.avg_precision), 4) if row.avg_precision else None,
         avg_citation_accuracy=round(float(row.avg_citation), 4) if row.avg_citation else None,
         avg_answer_relevance=round(float(row.avg_relevance), 4) if row.avg_relevance else None,
         avg_response_time_ms=int(row.avg_time) if row.avg_time else None,
+        category_averages=category_averages,
         last_run=last_row.isoformat() if last_row else None,
     )
