@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.exceptions import LLMProviderError, RAGQueryError
 from api.routes.auth import get_current_user
 from config import settings
+from core.rag.full_review import full_review_document
 from core.rag.pipeline import query_document, _CONFIDENCE_MAP
 from core.rag.pricing import estimate_cost
 from core.rag.token_counter import count_document_tokens, count_text_tokens, get_review_strategy
@@ -247,4 +248,131 @@ async def estimate_cost_endpoint(
         threshold_tokens=settings.full_review_token_threshold,
         pricing_available=cost_result["pricing_available"],
         message=message,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Full review endpoint
+# ---------------------------------------------------------------------------
+
+
+class FullReviewRequest(BaseModel):
+    """Request body for full document review."""
+
+    document_id: uuid.UUID
+
+
+class FindingResponse(BaseModel):
+    """A single finding from a full document review."""
+
+    category: str
+    severity: str
+    title: str
+    description: str
+    section_reference: str | None = None
+    recommendation: str | None = None
+
+
+class DeadlineResponse(BaseModel):
+    """A deadline found in the document."""
+
+    description: str
+    date_or_period: str
+    section_reference: str | None = None
+
+
+class FullReviewResponse(BaseModel):
+    """Response from a full document review."""
+
+    analysis_id: uuid.UUID
+    summary: str
+    document_type: str
+    parties: list[str]
+    key_findings: list[FindingResponse]
+    deadlines: list[DeadlineResponse]
+    overall_risk_assessment: str
+    confidence: str
+    model_used: str
+    strategy_used: str
+    response_time_ms: int
+    total_tokens: int
+
+
+_RISK_SCORE_MAP = {"low": 0.9, "moderate": 0.7, "high": 0.4, "critical": 0.2}
+
+
+@router.post("/full-review", response_model=FullReviewResponse)
+async def full_review(
+    request: FullReviewRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FullReviewResponse:
+    """Run a comprehensive review of a legal document.
+
+    Analyzes the entire document for risks, obligations, deadlines,
+    unusual terms, missing clauses, contradictions, and ambiguities.
+    Uses single-call or map-reduce strategy based on document size.
+    """
+    try:
+        result = await full_review_document(
+            document_id=request.document_id,
+            db=db,
+            user=current_user,
+        )
+    except RAGQueryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except LLMProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    # Store in analyses table
+    risk_str = result.get("overall_risk_assessment", "unknown")
+    confidence_num = _RISK_SCORE_MAP.get(risk_str, 0.5)
+
+    analysis = Analysis(
+        user_id=current_user.id,
+        document_id=request.document_id,
+        analysis_type="full_review",
+        result=result,
+        confidence_score=confidence_num,
+    )
+    db.add(analysis)
+    await db.flush()
+
+    # Build response
+    metadata = result.get("metadata", {})
+
+    findings = [
+        FindingResponse(
+            category=f.get("category", ""),
+            severity=f.get("severity", ""),
+            title=f.get("title", ""),
+            description=f.get("description", ""),
+            section_reference=f.get("section_reference"),
+            recommendation=f.get("recommendation"),
+        )
+        for f in result.get("key_findings", [])
+    ]
+
+    deadlines = [
+        DeadlineResponse(
+            description=d.get("description", ""),
+            date_or_period=d.get("date_or_period", ""),
+            section_reference=d.get("section_reference"),
+        )
+        for d in result.get("deadlines", [])
+    ]
+
+    return FullReviewResponse(
+        analysis_id=analysis.id,
+        summary=result.get("summary", ""),
+        document_type=result.get("document_type", "Unknown"),
+        parties=result.get("parties", []),
+        key_findings=findings,
+        deadlines=deadlines,
+        overall_risk_assessment=risk_str,
+        confidence=result.get("confidence", "low"),
+        model_used=metadata.get("model_used", "unknown"),
+        strategy_used=metadata.get("strategy_used", "unknown"),
+        response_time_ms=metadata.get("response_time_ms", 0),
+        total_tokens=metadata.get("total_tokens", 0),
     )

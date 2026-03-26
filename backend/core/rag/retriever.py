@@ -1,7 +1,7 @@
-"""Vector similarity search using pgvector.
+"""Chunk retrieval from pgvector.
 
-Retrieves the most relevant document chunks for a given query
-using cosine distance on BGE embeddings stored in PostgreSQL.
+Provides vector similarity search for targeted queries and
+sequential loading for full document reviews.
 """
 
 import logging
@@ -89,3 +89,41 @@ async def retrieve_chunks(
     )
 
     return results
+
+
+async def load_all_chunks(document_id: uuid.UUID, db: AsyncSession) -> list[dict]:
+    """Load all chunks for a document, ordered by chunk_index.
+
+    Used for full document reviews where the entire document content
+    is needed, not just the most relevant chunks.
+
+    Args:
+        document_id: UUID of the document.
+        db: Async database session.
+
+    Returns:
+        List of dicts ordered by chunk_index, each containing:
+            - chunk_id: UUID
+            - content: str
+            - section_title: str | None
+            - page_number: int | None
+            - chunk_index: int
+    """
+    stmt = (
+        select(Chunk)
+        .where(Chunk.document_id == document_id)
+        .order_by(Chunk.chunk_index)
+    )
+    result = await db.execute(stmt)
+    chunks = result.scalars().all()
+
+    return [
+        {
+            "chunk_id": chunk.id,
+            "content": chunk.content,
+            "section_title": chunk.section_title,
+            "page_number": chunk.page_number,
+            "chunk_index": chunk.chunk_index,
+        }
+        for chunk in chunks
+    ]
