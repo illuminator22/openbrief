@@ -1,4 +1,4 @@
-"""User settings endpoints for LLM key management."""
+"""User settings endpoints for LLM key management and model selection."""
 
 import logging
 
@@ -10,6 +10,7 @@ from api.exceptions import EncryptionError
 from api.routes.auth import get_current_user
 from core.llm.encryption import encrypt_api_key
 from core.llm.provider import SUPPORTED_PROVIDERS
+from core.rag.pricing import VALID_MODEL_IDS, get_supported_models_with_pricing
 from db.database import get_db
 from db.models import User
 
@@ -48,7 +49,7 @@ async def set_llm_key(
 ) -> MessageResponse:
     """Store an encrypted LLM API key for the current user.
 
-    Validates the provider, encrypts the key, and stores it.
+    Validates the provider and model, encrypts the key, and stores it.
     Never returns or logs the actual API key.
     """
     if request.provider not in SUPPORTED_PROVIDERS:
@@ -56,6 +57,13 @@ async def set_llm_key(
             status_code=400,
             detail=f"Unsupported provider: '{request.provider}'. "
             f"Supported: {', '.join(sorted(SUPPORTED_PROVIDERS))}",
+        )
+
+    if request.model and request.model not in VALID_MODEL_IDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported model: '{request.model}'. "
+            f"Supported: {', '.join(sorted(VALID_MODEL_IDS))}",
         )
 
     if not request.api_key.strip():
@@ -90,6 +98,15 @@ async def get_llm_settings(
         model=current_user.llm_model,
         has_key=current_user.encrypted_llm_key is not None,
     )
+
+
+@router.get("/models")
+async def list_models() -> dict:
+    """Return all supported models grouped by provider, with pricing.
+
+    Powers the frontend model selector and shows pricing per model.
+    """
+    return {"models": get_supported_models_with_pricing()}
 
 
 @router.delete("/llm-key", response_model=MessageResponse)

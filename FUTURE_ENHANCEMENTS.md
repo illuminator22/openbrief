@@ -174,6 +174,24 @@ This document tracks every "do this later" or "future enhancement" mentioned dur
 - **What:** Before running expensive operations (full reviews), estimate API cost and show it to the user for confirmation.
 - **When to do it:** Phase 2 when building the full document review pipeline.
 
+### 16.5 Conversational Follow-ups After Reviews
+- **When mentioned:** Phase 2 (during full review pipeline testing, 2026-03-26)
+- **What:** After a full document review, users should be able to ask follow-up questions in a chat-like interface where the LLM has context of the review and prior conversation. Currently, targeted queries and full reviews are independent — each starts fresh with no memory of previous interactions.
+- **Architecture:** Add a `conversations` table to store message history per session (review results + follow-up questions + answers). Include prior messages in the prompt so the LLM has conversational context. The frontend would present this as a chat interface on the document detail page.
+- **Why deferred:** The LangGraph agent system in Phase 3 manages state across steps, making it a more natural place to add conversation memory. Building it before the agent architecture would mean refactoring later.
+- **When to do it:** Phase 3 when building the LangGraph orchestrator, or as a post-launch enhancement. The agents already maintain state — extending that to multi-turn conversation is a natural fit.
+
+### 16.7 Per-Agent Model Selection
+- **When mentioned:** Phase 2 (during evaluation system and model management implementation)
+- **What:** Currently all agents use the same user-selected model. In Phase 3, allow per-agent model assignment so users can optimize cost vs quality per step:
+  - Research Agent: No LLM call (vector search only)
+  - Analysis Agent: Frontier model needed (best reasoning for risk identification)
+  - Draft Agent: Mid-tier model sufficient (good writing, cheaper — e.g., GPT-5.4-mini, Sonnet 4.6)
+  - Fact-Check Agent: Frontier model needed (precision matters for citation verification)
+- **Why it matters:** A full review running all agents on GPT-5.4 or Opus 4.6 is expensive. Letting the Draft step use a cheaper model could cut total review cost by 20-30% with minimal quality loss.
+- **Architecture:** Add model_override per agent in the LangGraph orchestrator config. Default to the user's selected model, but allow overrides in settings or per-request.
+- **When to do it:** Phase 3 when building the LangGraph agent orchestration. The orchestrator already manages per-agent config — adding model selection is a natural extension.
+
 ### 17. Semantic Routing
 - **When mentioned:** CLAUDE_CODE_PROMPT.md (Phase 3)
 - **What:** Using bge-small-en-v1.5 embeddings to classify user queries as "targeted question" vs "full review" instead of keyword matching.

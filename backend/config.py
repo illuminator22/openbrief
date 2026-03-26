@@ -51,5 +51,11 @@ class Settings(BaseSettings):
     # Full Review Strategy
     full_review_token_threshold: int = 80000
 
+    # Evaluation
+    # Use the best available frontier model for evaluation. Scoring accuracy matters more than cost.
+    eval_api_key: str | None = None
+    eval_model: str = "gpt-5.4"
+    eval_document_id: str | None = None
+
 
 settings = Settings()
