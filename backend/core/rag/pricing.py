@@ -18,7 +18,6 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     "claude-opus-4-6": {"input": 5.00, "output": 25.00},
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
     # DeepSeek
-    "deepseek-chat": {"input": 0.30, "output": 0.50},
     "deepseek-reasoner": {"input": 0.55, "output": 2.19},
 }
 
@@ -34,8 +33,7 @@ SUPPORTED_MODELS: dict[str, list[dict[str, str]]] = {
         {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "description": "Balanced performance and cost"},
     ],
     "deepseek": [
-        {"id": "deepseek-chat", "name": "DeepSeek Chat", "description": "Fast, very low cost"},
-        {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner", "description": "Advanced reasoning, low cost"},
+        {"id": "deepseek-reasoner", "name": "DeepSeek R1", "description": "Advanced reasoning, low cost"},
     ],
 }
 
