@@ -123,6 +123,52 @@ async def query_analysis(
     )
 
 
+@router.get("/document/{document_id}/latest", response_model=FullReviewResponse | None)
+async def get_latest_review(
+    document_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FullReviewResponse | None:
+    """Get the latest full review for a document, if one exists."""
+    from sqlalchemy import select
+
+    stmt = (
+        select(Analysis)
+        .where(Analysis.document_id == document_id)
+        .where(Analysis.user_id == current_user.id)
+        .where(Analysis.analysis_type == "full_review")
+        .order_by(Analysis.created_at.desc())
+        .limit(1)
+    )
+    result_row = await db.execute(stmt)
+    analysis = result_row.scalar_one_or_none()
+
+    if analysis is None:
+        return None
+
+    r = analysis.result or {}
+    metadata = r.get("metadata", {})
+
+    return FullReviewResponse(
+        analysis_id=analysis.id,
+        summary=r.get("summary", ""),
+        document_type=r.get("document_type", "Unknown"),
+        parties=r.get("parties", []),
+        key_findings=[
+            FindingResponse(**f) for f in r.get("key_findings", [])
+        ],
+        deadlines=[
+            DeadlineResponse(**d) for d in r.get("deadlines", [])
+        ],
+        overall_risk_assessment=r.get("overall_risk_assessment", "unknown"),
+        confidence=r.get("confidence", "low"),
+        model_used=metadata.get("model_used", "unknown"),
+        strategy_used=metadata.get("strategy_used", "unknown"),
+        response_time_ms=metadata.get("response_time_ms", 0),
+        total_tokens=metadata.get("total_tokens", 0),
+    )
+
+
 class EstimateRequest(BaseModel):
     """Request body for cost estimation."""
 

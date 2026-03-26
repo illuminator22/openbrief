@@ -15,7 +15,9 @@
       "WebFetch(domain:deardesigner.substack.com)",
       "WebFetch(domain:www.color-hex.com)",
       "Bash(python -m alembic revision -m \"rename api_key_hash to encrypted_llm_key\")",
-      "Bash(python -m alembic revision -m \"add llm_model column and update defaults\")"
+      "Bash(python -m alembic revision -m \"add llm_model column and update defaults\")",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)"
     ]
   }
 }
