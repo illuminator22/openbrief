@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import Providers from "@/components/Providers";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -36,6 +37,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex">
+        <Providers>
         {/* Sidebar */}
         <nav className="w-56 flex-shrink-0 bg-[var(--sidebar-bg)] flex flex-col min-h-screen border-r border-[var(--border)]">
           <div className="p-5 border-b border-[var(--border)]">
@@ -75,6 +77,7 @@ export default function RootLayout({
         <main className="flex-1 overflow-auto">
           {children}
         </main>
+        </Providers>
       </body>
     </html>
   );

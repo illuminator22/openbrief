@@ -66,6 +66,7 @@ async def query_document(
     db: AsyncSession,
     user: User,
     top_k: int | None = None,
+    model_override: str | None = None,
 ) -> dict:
     """Run the full RAG query pipeline for a document.
 
@@ -78,6 +79,7 @@ async def query_document(
         db: Async database session.
         user: The authenticated user (must have an API key stored).
         top_k: Number of chunks to retrieve. Defaults to settings.rag_top_k.
+        model_override: Optional model to use instead of user's configured model.
 
     Returns:
         Dict containing: answer, citations, confidence, insufficient_information,
@@ -151,7 +153,7 @@ async def query_document(
         raise RAGQueryError(f"Failed to decrypt API key: {exc}") from exc
 
     provider = get_llm_provider(api_key, user.llm_provider)
-    model = user.llm_model or settings.default_llm_model
+    model = model_override or user.llm_model or settings.default_llm_model
 
     # Step 4: Call LLM
     step_start = time.time()

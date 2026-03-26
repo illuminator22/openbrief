@@ -12,7 +12,7 @@ from api.routes.auth import get_current_user
 from config import settings
 from core.rag.full_review import full_review_document
 from core.rag.pipeline import query_document, _CONFIDENCE_MAP
-from core.rag.pricing import estimate_cost
+from core.rag.pricing import VALID_MODEL_IDS, estimate_cost
 from core.rag.token_counter import count_document_tokens, count_text_tokens, get_review_strategy
 from core.rag.prompts import RAG_SYSTEM_PROMPT
 from db.database import get_db
@@ -28,6 +28,7 @@ class QueryRequest(BaseModel):
 
     document_id: uuid.UUID
     question: str = Field(..., min_length=1, max_length=2000)
+    model: str | None = None
 
 
 class CitationResponse(BaseModel):
@@ -63,12 +64,20 @@ async def query_analysis(
     Retrieves relevant chunks, sends them with the question to the
     user's configured LLM, and returns a cited answer.
     """
+    if request.model and request.model not in VALID_MODEL_IDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported model: '{request.model}'. "
+            f"Supported: {', '.join(sorted(VALID_MODEL_IDS))}",
+        )
+
     try:
         result = await query_document(
             document_id=request.document_id,
             question=request.question,
             db=db,
             user=current_user,
+            model_override=request.model,
         )
     except RAGQueryError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

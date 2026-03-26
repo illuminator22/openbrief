@@ -3,10 +3,26 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 
 import StatusBadge from "@/components/StatusBadge";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+// --- Type definitions ---
+
+interface LLMSettings {
+  provider: string | null;
+  model: string | null;
+  has_key: boolean;
+}
+
+interface ModelInfo {
+  id: string;
+  name: string;
+  description: string;
+  pricing: { input: number; output: number } | null;
+}
 
 interface DocumentDetail {
   id: string;
@@ -16,6 +32,24 @@ interface DocumentDetail {
   upload_status: string;
   created_at: string;
   chunk_count: number;
+}
+
+interface Citation {
+  excerpt_number: number;
+  chunk_id: string | null;
+  page_number: number | null;
+  section_title: string | null;
+  relevant_quote: string;
+}
+
+interface QueryResult {
+  analysis_id: string;
+  answer: string;
+  citations: Citation[];
+  confidence: string;
+  insufficient_information: boolean;
+  model_used: string;
+  response_time_ms: number;
 }
 
 interface ChunkResult {
@@ -33,21 +67,76 @@ interface SearchResult {
   results: ChunkResult[];
 }
 
+type QueryMode = "ask" | "search";
+
+// --- Confidence badge ---
+
+function ConfidenceBadge({ level }: { level: string }) {
+  const styles: Record<string, string> = {
+    high: "bg-[var(--success)]/15 text-[var(--success)]",
+    medium: "bg-[var(--accent)]/15 text-[var(--accent)]",
+    low: "bg-[var(--error)]/15 text-[var(--error)]",
+  };
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[level] || styles.low}`}>
+      {level} confidence
+    </span>
+  );
+}
+
+// --- Main component ---
+
 export default function DocumentDetailPage() {
   const params = useParams();
   const documentId = params.id as string;
 
+  // Document state
   const [document, setDocument] = useState<DocumentDetail | null>(null);
   const [docLoading, setDocLoading] = useState(true);
   const [docError, setDocError] = useState("");
 
+  // Query state
   const [query, setQuery] = useState("");
-  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState("");
+  const [mode, setMode] = useState<QueryMode>("ask");
+  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
+  // LLM settings + models
+  const { data: llmSettings } = useQuery<LLMSettings>({
+    queryKey: ["llm-settings"],
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/settings/llm`);
+      if (!res.ok) throw new Error("Failed to load settings");
+      return res.json();
+    },
+  });
+
+  const { data: modelsData } = useQuery<{ models: Record<string, ModelInfo[]> }>({
+    queryKey: ["models"],
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/settings/models`);
+      if (!res.ok) throw new Error("Failed to load models");
+      return res.json();
+    },
+  });
+
+  // Set default model from user settings
+  useEffect(() => {
+    if (llmSettings?.model && !selectedModel) {
+      setSelectedModel(llmSettings.model);
+    }
+  }, [llmSettings, selectedModel]);
+
+  const hasApiKey = llmSettings?.has_key === true;
+  const providerModels = modelsData?.models?.[llmSettings?.provider || ""] || [];
+
+  // Results state
+  const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
+  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [expandedChunks, setExpandedChunks] = useState<Set<string>>(new Set());
 
+  // Fetch document
   useEffect(() => {
     async function fetchDocument() {
       try {
@@ -55,68 +144,81 @@ export default function DocumentDetailPage() {
         if (!res.ok) {
           throw new Error(res.status === 404 ? "Document not found" : `Error ${res.status}`);
         }
-        const data: DocumentDetail = await res.json();
-        setDocument(data);
+        setDocument(await res.json());
       } catch (err) {
         setDocError(err instanceof Error ? err.message : "Failed to load document");
       } finally {
         setDocLoading(false);
       }
     }
-
     fetchDocument();
   }, [documentId]);
 
-  const handleSearch = useCallback(async () => {
+  // Handle query submission
+  const handleSubmit = useCallback(async () => {
     if (!query.trim()) return;
 
-    setSearching(true);
-    setSearchError("");
+    setLoading(true);
+    setError("");
+    setQueryResult(null);
     setSearchResult(null);
 
     try {
-      const res = await fetch(
-        `${API_URL}/api/documents/${documentId}/search?q=${encodeURIComponent(query.trim())}`
-      );
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.detail || `Search failed (${res.status})`);
+      if (mode === "ask") {
+        // RAG pipeline — calls LLM, costs money
+        const body: Record<string, string> = {
+          document_id: documentId,
+          question: query.trim(),
+        };
+        if (selectedModel) body.model = selectedModel;
+        const res = await fetch(`${API_URL}/api/analysis/query`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.detail || `Query failed (${res.status})`);
+        }
+        setQueryResult(await res.json());
+      } else {
+        // Chunk search — vector similarity, free
+        const res = await fetch(
+          `${API_URL}/api/documents/${documentId}/search?q=${encodeURIComponent(query.trim())}`
+        );
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.detail || `Search failed (${res.status})`);
+        }
+        setSearchResult(await res.json());
       }
-      const data: SearchResult = await res.json();
-      setSearchResult(data);
     } catch (err) {
-      setSearchError(err instanceof Error ? err.message : "Search failed");
+      setError(err instanceof Error ? err.message : "Request failed");
     } finally {
-      setSearching(false);
+      setLoading(false);
     }
-  }, [query, documentId]);
+  }, [query, mode, documentId]);
 
-  const toggleExpand = useCallback((chunkId: string) => {
+  const toggleExpand = useCallback((id: string) => {
     setExpandedChunks((prev) => {
       const next = new Set(prev);
-      if (next.has(chunkId)) {
-        next.delete(chunkId);
-      } else {
-        next.add(chunkId);
-      }
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   }, []);
 
-  const formatDate = (iso: string): string => {
-    return new Date(iso).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleDateString("en-US", {
+      month: "short", day: "numeric", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
     });
-  };
 
-  const formatSize = (bytes: number): string => {
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
+  const formatSize = (bytes: number) =>
+    bytes < 1024 * 1024
+      ? `${(bytes / 1024).toFixed(1)} KB`
+      : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+
+  // --- Render ---
 
   if (docLoading) {
     return (
@@ -161,37 +263,146 @@ export default function DocumentDetailPage() {
         </p>
       </div>
 
-      {/* Search section */}
+      {/* Query section */}
       {document.upload_status === "completed" && (
         <div className="mt-8">
-          <h3 className="text-lg font-semibold mb-4">Search this document</h3>
+          {/* Mode toggle */}
+          <div className="flex items-center gap-2 mb-4">
+            <button
+              onClick={() => setMode("ask")}
+              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                mode === "ask"
+                  ? "bg-[var(--accent)] text-white"
+                  : "bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)]"
+              }`}
+            >
+              Ask (uses LLM)
+            </button>
+            <button
+              onClick={() => setMode("search")}
+              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                mode === "search"
+                  ? "bg-[var(--accent)] text-white"
+                  : "bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)]"
+              }`}
+            >
+              Search (free)
+            </button>
+            <span className="text-xs text-[var(--muted)] ml-2">
+              {mode === "ask"
+                ? "AI-powered answer with citations — uses your API key"
+                : "Vector similarity search — returns matching chunks, no LLM cost"}
+            </span>
+          </div>
 
+          {/* Model selector (Ask mode only) */}
+          {mode === "ask" && (
+            <div className="mb-4">
+              {hasApiKey ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-[var(--muted)]">Model:</span>
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-1.5 text-xs text-[var(--foreground)] focus:border-[var(--accent)] focus:outline-none transition-colors"
+                  >
+                    {providerModels.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <p className="text-xs text-[var(--accent)]">
+                  No API key configured —{" "}
+                  <Link href="/settings" className="underline hover:opacity-80">
+                    go to Settings
+                  </Link>
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Input */}
           <div className="flex gap-3">
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              placeholder="Ask a question about this document"
+              onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+              placeholder={
+                mode === "ask"
+                  ? "Ask a question about this document"
+                  : "Search for keywords or topics"
+              }
               className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-4 py-2.5 text-sm text-[var(--foreground)] placeholder:text-[var(--muted)] focus:border-[var(--accent)] focus:outline-none transition-colors"
             />
             <button
-              onClick={handleSearch}
-              disabled={searching || !query.trim()}
+              onClick={handleSubmit}
+              disabled={loading || !query.trim()}
               className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {searching ? "Searching..." : "Search"}
+              {loading ? (mode === "ask" ? "Thinking..." : "Searching...") : mode === "ask" ? "Ask" : "Search"}
             </button>
           </div>
 
-          {/* Search error */}
-          {searchError && (
+          {/* Error */}
+          {error && (
             <div className="mt-3 rounded-xl border border-[var(--error)]/30 bg-[var(--error)]/5 p-3">
-              <p className="text-sm text-[var(--error)]">{searchError}</p>
+              <p className="text-sm text-[var(--error)]">{error}</p>
             </div>
           )}
 
-          {/* Search results */}
+          {/* RAG query result */}
+          {queryResult && (
+            <div className="mt-6 space-y-4">
+              {/* Metadata bar */}
+              <div className="flex items-center gap-3 text-xs text-[var(--muted)]">
+                <ConfidenceBadge level={queryResult.confidence} />
+                <span>{queryResult.model_used}</span>
+                <span>{(queryResult.response_time_ms / 1000).toFixed(1)}s</span>
+                {queryResult.insufficient_information && (
+                  <span className="text-[var(--accent)]">Insufficient information</span>
+                )}
+              </div>
+
+              {/* Answer */}
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+                <p className="text-sm leading-relaxed font-content whitespace-pre-wrap">
+                  {queryResult.answer}
+                </p>
+              </div>
+
+              {/* Citations */}
+              {queryResult.citations.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium text-[var(--muted)] mb-2">
+                    Citations ({queryResult.citations.length})
+                  </h4>
+                  <div className="space-y-2">
+                    {queryResult.citations.map((c, i) => (
+                      <div
+                        key={i}
+                        className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3"
+                      >
+                        <div className="flex items-center gap-2 text-xs text-[var(--muted)] mb-1">
+                          <span className="font-medium text-[var(--accent)]">[{c.excerpt_number}]</span>
+                          {c.section_title && <span>{c.section_title}</span>}
+                          {c.page_number && <span>Page {c.page_number}</span>}
+                        </div>
+                        <p className="text-xs leading-relaxed font-content italic">
+                          &ldquo;{c.relevant_quote}&rdquo;
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Chunk search results */}
           {searchResult && (
             <div className="mt-6 space-y-3">
               <p className="text-sm text-[var(--muted)]">
