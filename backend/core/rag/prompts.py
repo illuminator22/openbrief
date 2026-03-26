@@ -5,6 +5,8 @@ using only the provided document excerpts, with structured JSON output
 and citation tracking.
 """
 
+import json
+
 # ---------------------------------------------------------------------------
 # Targeted query prompts (existing)
 # ---------------------------------------------------------------------------
@@ -266,7 +268,6 @@ def format_map_outputs(map_results: list[dict], chunks: list[dict]) -> str:
     for i, (result, chunk) in enumerate(zip(map_results, chunks), start=1):
         section = chunk.get("section_title") or "Untitled"
         page = chunk.get("page_number") or "?"
-        import json
         findings_json = json.dumps(result.get("findings", []), indent=2)
         parts.append(
             f"[Excerpt {i}] (Page {page}, Section: {section})\n"
