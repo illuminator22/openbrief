@@ -27,6 +27,7 @@ class EvalRunResponse(BaseModel):
     failed: int
     model_used: str
     averages: dict[str, float | None]
+    category_averages: dict[str, dict[str, float | None]]
 
 
 class EvalLogEntry(BaseModel):
@@ -113,6 +114,7 @@ async def run_evaluation(
         failed=result["failed"],
         model_used=result["model_used"],
         averages=result["averages"],
+        category_averages=result.get("category_averages", {}),
     )
 
 

@@ -17,6 +17,9 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     # Anthropic
     "claude-opus-4-6": {"input": 5.00, "output": 25.00},
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
+    # DeepSeek
+    "deepseek-chat": {"input": 0.30, "output": 0.50},
+    "deepseek-reasoner": {"input": 0.55, "output": 2.19},
 }
 
 # Models available for user selection, grouped by provider
@@ -29,6 +32,10 @@ SUPPORTED_MODELS: dict[str, list[dict[str, str]]] = {
     "anthropic": [
         {"id": "claude-opus-4-6", "name": "Claude Opus 4.6", "description": "Most capable, 1M context"},
         {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "description": "Balanced performance and cost"},
+    ],
+    "deepseek": [
+        {"id": "deepseek-chat", "name": "DeepSeek Chat", "description": "Fast, very low cost"},
+        {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner", "description": "Advanced reasoning, low cost"},
     ],
 }
 

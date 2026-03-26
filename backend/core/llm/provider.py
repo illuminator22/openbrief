@@ -16,7 +16,7 @@ from api.exceptions import LLMProviderError
 logger = logging.getLogger(__name__)
 
 # Supported provider names
-SUPPORTED_PROVIDERS = {"openai", "anthropic"}
+SUPPORTED_PROVIDERS = {"openai", "anthropic", "deepseek"}
 
 
 class LLMProvider(ABC):
@@ -149,12 +149,61 @@ class AnthropicProvider(LLMProvider):
             raise LLMProviderError(f"Anthropic request failed: {exc}") from exc
 
 
+class DeepSeekProvider(LLMProvider):
+    """DeepSeek API provider using the OpenAI SDK with custom base URL.
+
+    DeepSeek uses an OpenAI-compatible API, so we reuse the OpenAI SDK
+    with a different base_url.
+    """
+
+    def __init__(self, api_key: str) -> None:
+        """Initialize with a decrypted DeepSeek API key."""
+        self._client = openai.AsyncOpenAI(
+            api_key=api_key,
+            base_url="https://api.deepseek.com",
+        )
+
+    async def complete(
+        self,
+        messages: list[dict],
+        model: str,
+        temperature: float = 0.0,
+        max_tokens: int = 4096,
+        json_mode: bool = False,
+    ) -> str:
+        """Call DeepSeek chat completions API."""
+        try:
+            kwargs: dict = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            if json_mode:
+                kwargs["response_format"] = {"type": "json_object"}
+            response = await self._client.chat.completions.create(**kwargs)
+            content = response.choices[0].message.content
+            if content is None:
+                raise LLMProviderError("DeepSeek returned empty response")
+            return content
+        except openai.AuthenticationError as exc:
+            raise LLMProviderError("Invalid DeepSeek API key") from exc
+        except openai.RateLimitError as exc:
+            raise LLMProviderError("DeepSeek rate limit exceeded") from exc
+        except openai.APIError as exc:
+            raise LLMProviderError(f"DeepSeek API error: {exc}") from exc
+        except LLMProviderError:
+            raise
+        except Exception as exc:
+            raise LLMProviderError(f"DeepSeek request failed: {exc}") from exc
+
+
 def get_llm_provider(api_key: str, provider_name: str) -> LLMProvider:
     """Create an LLM provider instance for the given provider name.
 
     Args:
         api_key: Decrypted API key for the provider.
-        provider_name: Provider identifier ("openai" or "anthropic").
+        provider_name: Provider identifier ("openai", "anthropic", or "deepseek").
 
     Returns:
         An LLMProvider instance ready to make API calls.
@@ -166,6 +215,8 @@ def get_llm_provider(api_key: str, provider_name: str) -> LLMProvider:
         return OpenAIProvider(api_key)
     elif provider_name == "anthropic":
         return AnthropicProvider(api_key)
+    elif provider_name == "deepseek":
+        return DeepSeekProvider(api_key)
     else:
         raise LLMProviderError(
             f"Unsupported LLM provider: '{provider_name}'. "

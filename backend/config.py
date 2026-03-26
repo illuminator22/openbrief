@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # LLM Defaults
     default_llm_provider: str = "openai"
-    default_llm_model: str = "gpt-4o"
+    default_llm_model: str = "gpt-5.4"
 
     # Entity Extraction
     entity_extraction_backend: str = "prompt"

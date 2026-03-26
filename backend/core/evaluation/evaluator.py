@@ -59,6 +59,7 @@ def _run_single_evaluation(
     test_case = LLMTestCase(
         input=question,
         actual_output=answer,
+        context=retrieved_context,
         retrieval_context=retrieved_context,
         expected_output=expected_answer,
     )
@@ -154,12 +155,10 @@ async def evaluate_test_suite(
 
     total = len(test_cases)
     results: list[dict] = []
-    metric_totals: dict[str, list[float]] = {
-        "hallucination": [],
-        "answer_relevancy": [],
-        "faithfulness": [],
-        "contextual_precision": [],
-    }
+    metric_names = ["hallucination", "answer_relevancy", "faithfulness", "contextual_precision"]
+    metric_totals: dict[str, list[float]] = {m: [] for m in metric_names}
+    # Per-category metric tracking
+    category_totals: dict[str, dict[str, list[float]]] = {}
 
     model_used = model_override or user.llm_model or settings.default_llm_model
 
@@ -218,15 +217,21 @@ async def evaluate_test_suite(
                 db.add(log_entry)
                 await db.flush()
 
-                # Accumulate scores
-                for metric_name in metric_totals:
+                # Accumulate scores (overall and per-category)
+                category = tc.get("category", "unknown")
+                if category not in category_totals:
+                    category_totals[category] = {m: [] for m in metric_names}
+
+                for metric_name in metric_names:
                     score = eval_result.get(metric_name, {}).get("score")
                     if score is not None:
                         metric_totals[metric_name].append(score)
+                        category_totals[category][metric_name].append(score)
 
                 tc_elapsed = time.time() - tc_start
                 results.append({
                     "id": tc_id,
+                    "category": category,
                     "status": "success",
                     "scores": eval_result,
                     "response_time_ms": response_time_ms,
@@ -246,10 +251,19 @@ async def evaluate_test_suite(
         if model_override:
             user.llm_model = original_model
 
-    # Compute averages
+    # Compute overall averages
     averages: dict[str, float | None] = {}
     for metric_name, scores in metric_totals.items():
         averages[metric_name] = round(sum(scores) / len(scores), 4) if scores else None
+
+    # Compute per-category averages
+    category_averages: dict[str, dict[str, float | None]] = {}
+    for category, cat_metrics in category_totals.items():
+        category_averages[category] = {}
+        for metric_name, scores in cat_metrics.items():
+            category_averages[category][metric_name] = (
+                round(sum(scores) / len(scores), 4) if scores else None
+            )
 
     passed = sum(1 for r in results if r.get("status") == "success")
     failed = sum(1 for r in results if r.get("status") == "error")
@@ -260,5 +274,6 @@ async def evaluate_test_suite(
         "failed": failed,
         "model_used": model_used,
         "averages": averages,
+        "category_averages": category_averages,
         "results": results,
     }
