@@ -70,7 +70,7 @@ class OpenAIProvider(LLMProvider):
                 "model": model,
                 "messages": messages,
                 "temperature": temperature,
-                "max_tokens": max_tokens,
+                "max_completion_tokens": max_tokens,
             }
             if json_mode:
                 kwargs["response_format"] = {"type": "json_object"}
