@@ -107,6 +107,11 @@ This document tracks every "do this later" or "future enhancement" mentioned dur
 - **Why deferred:** JSON failures should be rare now that OpenAI's `response_format: json_object` is enabled. Anthropic still relies on prompt instructions.
 - **When to do it:** Phase 3 when building the agent trace system. Log retry occurrences and costs in the `agent_trace` JSONB field on the analyses table.
 
+### 11.55 Increase provider max_tokens for full review pipeline
+- **When mentioned:** Phase 2 (token cost estimation, 2026-03-25)
+- **What:** The LLM provider `complete()` method defaults to `max_tokens=4096`. Full document reviews need longer responses — the cost estimator already caps output at 8192 tokens. When building the full review pipeline, update the provider call to pass a higher `max_tokens` (8192 or configurable).
+- **When to do it:** Phase 2 when building the full document review flow.
+
 ### 11.6 Ingestion Performance on Droplet (2 vCPU / 4GB)
 - **When mentioned:** Day 5 (first real upload test on droplet)
 - **Benchmarks** (10-page CA Master Services Agreement, 37 chunks):
