@@ -16,3 +16,4 @@ cryptography
 openai
 anthropic
 deepeval
+langgraph

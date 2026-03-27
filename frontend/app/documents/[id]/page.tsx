@@ -67,6 +67,21 @@ interface SearchResult {
   results: ChunkResult[];
 }
 
+interface RoutingInfo {
+  route: string;
+  confidence: number;
+  full_review_score: number;
+  targeted_score: number;
+  low_confidence: boolean;
+}
+
+interface UnifiedResult {
+  route_detected: string;
+  routing: RoutingInfo;
+  query_result: QueryResult | null;
+  estimate: CostEstimate | null;
+}
+
 interface CostEstimate {
   document_id: string;
   operation: string;
@@ -109,8 +124,6 @@ interface FullReviewResult {
   response_time_ms: number;
   total_tokens: number;
 }
-
-type QueryMode = "ask" | "search";
 
 // --- Helper components ---
 
@@ -172,15 +185,17 @@ export default function DocumentDetailPage() {
 
   // Query state
   const [query, setQuery] = useState("");
-  const [mode, setMode] = useState<QueryMode>("ask");
   const [selectedModel, setSelectedModel] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [routeInfo, setRouteInfo] = useState<RoutingInfo | null>(null);
+  const [showFreeSearch, setShowFreeSearch] = useState(false);
 
   // Results state
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [expandedChunks, setExpandedChunks] = useState<Set<string>>(new Set());
+  const [freeSearchQuery, setFreeSearchQuery] = useState("");
 
   // Full review state
   const [showEstimate, setShowEstimate] = useState(false);
@@ -255,44 +270,65 @@ export default function DocumentDetailPage() {
     if (documentId) fetchPreviousReview();
   }, [documentId]);
 
-  // Handle query
-  const handleSubmit = useCallback(async () => {
-    if (!query.trim()) return;
+  // Handle unified submit — auto-routes to question or full review
+  const handleSubmit = useCallback(async (forceMode?: string) => {
+    const text = query.trim();
+    if (!text) return;
     setLoading(true);
     setError("");
     setQueryResult(null);
-    setSearchResult(null);
+    setRouteInfo(null);
 
     try {
-      if (mode === "ask") {
-        const body: Record<string, string> = { document_id: documentId, question: query.trim() };
-        if (selectedModel) body.model = selectedModel;
-        const res = await fetch(`${API_URL}/api/analysis/query`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => null);
-          throw new Error(data?.detail || `Query failed (${res.status})`);
-        }
-        setQueryResult(await res.json());
-      } else {
-        const res = await fetch(
-          `${API_URL}/api/documents/${documentId}/search?q=${encodeURIComponent(query.trim())}`
-        );
-        if (!res.ok) {
-          const data = await res.json().catch(() => null);
-          throw new Error(data?.detail || `Search failed (${res.status})`);
-        }
-        setSearchResult(await res.json());
+      const body: Record<string, string | null> = {
+        document_id: documentId,
+        text,
+        model: selectedModel || null,
+        force_mode: forceMode || null,
+      };
+      const res = await fetch(`${API_URL}/api/analysis/unified`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.detail || `Request failed (${res.status})`);
+      }
+      const unified: UnifiedResult = await res.json();
+      setRouteInfo(unified.routing);
+
+      if (unified.query_result) {
+        setQueryResult(unified.query_result);
+      } else if (unified.estimate) {
+        // Full review detected — show estimate dialog
+        setEstimate(unified.estimate);
+        setShowEstimate(true);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed");
     } finally {
       setLoading(false);
     }
-  }, [query, mode, documentId, selectedModel]);
+  }, [query, documentId, selectedModel]);
+
+  // Handle free search (vector similarity, no LLM)
+  const handleFreeSearch = useCallback(async () => {
+    if (!freeSearchQuery.trim()) return;
+    setSearchResult(null);
+    try {
+      const res = await fetch(
+        `${API_URL}/api/documents/${documentId}/search?q=${encodeURIComponent(freeSearchQuery.trim())}`
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.detail || `Search failed (${res.status})`);
+      }
+      setSearchResult(await res.json());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Search failed");
+    }
+  }, [freeSearchQuery, documentId]);
 
   // Handle full review estimate
   const handleEstimate = useCallback(async () => {
@@ -421,52 +457,26 @@ export default function DocumentDetailPage() {
 
       {document.upload_status === "completed" && (
         <>
-          {/* Query section — Ask/Search */}
+          {/* Unified query input */}
           <div className="mt-6">
-            <div className="flex items-center gap-2 mb-4">
-              <button
-                onClick={() => setMode("ask")}
-                className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                  mode === "ask" ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)]"
-                }`}
-              >
-                Ask (uses LLM)
-              </button>
-              <button
-                onClick={() => setMode("search")}
-                className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                  mode === "search" ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)]"
-                }`}
-              >
-                Search (free)
-              </button>
-              <span className="text-xs text-[var(--muted)] ml-2">
-                {mode === "ask" ? "AI-powered answer with citations" : "Vector similarity search"}
-              </span>
-            </div>
-
-            {/* Model selector */}
-            {mode === "ask" && (
-              <div className="mb-4">
-                {hasApiKey ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[var(--muted)]">Model:</span>
-                    <select
-                      value={selectedModel}
-                      onChange={(e) => setSelectedModel(e.target.value)}
-                      className="rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-1.5 text-xs text-[var(--foreground)] focus:border-[var(--accent)] focus:outline-none"
-                    >
-                      {providerModels.map((m) => (
-                        <option key={m.id} value={m.id}>{m.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                ) : (
-                  <p className="text-xs text-[var(--accent)]">
-                    No API key configured — <Link href="/settings" className="underline hover:opacity-80">go to Settings</Link>
-                  </p>
-                )}
+            {/* Model selector + no-key notice */}
+            {hasApiKey ? (
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xs text-[var(--muted)]">Model:</span>
+                <select
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-1.5 text-xs text-[var(--foreground)] focus:border-[var(--accent)] focus:outline-none"
+                >
+                  {providerModels.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
               </div>
+            ) : (
+              <p className="mb-3 text-xs text-[var(--accent)]">
+                No API key configured — <Link href="/settings" className="underline hover:opacity-80">go to Settings</Link>
+              </p>
             )}
 
             {/* Input */}
@@ -476,17 +486,28 @@ export default function DocumentDetailPage() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-                placeholder={mode === "ask" ? "Ask a question about this document" : "Search for keywords or topics"}
+                placeholder="Ask a question or request a full review..."
                 className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-4 py-2.5 text-sm text-[var(--foreground)] placeholder:text-[var(--muted)] focus:border-[var(--accent)] focus:outline-none transition-colors"
               />
               <button
-                onClick={handleSubmit}
-                disabled={loading || !query.trim()}
+                onClick={() => handleSubmit()}
+                disabled={loading || !query.trim() || !hasApiKey}
                 className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? (mode === "ask" ? "Thinking..." : "Searching...") : mode === "ask" ? "Ask" : "Search"}
+                {loading ? "Analyzing..." : "Analyze"}
               </button>
             </div>
+
+            {/* Route indicator */}
+            {routeInfo && !loading && (
+              <div className="mt-2 text-xs text-[var(--muted)]">
+                {routeInfo.low_confidence ? (
+                  <span>Not sure if this is a question or review request — treated as a question. Click &ldquo;Full Review&rdquo; below for comprehensive analysis.</span>
+                ) : (
+                  <span>Detected: {routeInfo.route === "full_review" ? "full review request" : "targeted question"}</span>
+                )}
+              </div>
+            )}
 
             {error && (
               <div className="mt-3 rounded-xl border border-[var(--error)]/30 bg-[var(--error)]/5 p-3">
@@ -527,35 +548,67 @@ export default function DocumentDetailPage() {
                 )}
               </div>
             )}
+          </div>
 
-            {/* Chunk search results */}
-            {searchResult && (
-              <div className="mt-6 space-y-3">
-                <p className="text-sm text-[var(--muted)]">
-                  {searchResult.results.length} result{searchResult.results.length !== 1 ? "s" : ""}
-                </p>
-                {searchResult.results.map((chunk) => {
-                  const isExpanded = expandedChunks.has(chunk.chunk_id);
-                  const displayContent = chunk.content.length > 300 && !isExpanded
-                    ? chunk.content.slice(0, 300) + "..." : chunk.content;
-                  return (
-                    <div key={chunk.chunk_id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-3 text-xs text-[var(--muted)]">
-                          {chunk.section_title && <span className="font-medium text-[var(--foreground)]">{chunk.section_title}</span>}
-                          {chunk.page_number && <span>Page {chunk.page_number}</span>}
+          {/* Free search (collapsible) */}
+          <div className="mt-6">
+            <button
+              onClick={() => setShowFreeSearch(!showFreeSearch)}
+              className="text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors flex items-center gap-1"
+            >
+              <svg className={`w-3 h-3 transition-transform ${showFreeSearch ? "rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+              Free Search (vector similarity, no API cost)
+            </button>
+            {showFreeSearch && (
+              <div className="mt-3">
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    value={freeSearchQuery}
+                    onChange={(e) => setFreeSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleFreeSearch()}
+                    placeholder="Search for keywords or topics..."
+                    className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-4 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--muted)] focus:border-[var(--accent)] focus:outline-none transition-colors"
+                  />
+                  <button
+                    onClick={handleFreeSearch}
+                    disabled={!freeSearchQuery.trim()}
+                    className="rounded-lg bg-[var(--surface)] px-4 py-2 text-sm font-medium text-[var(--muted)] transition-colors hover:text-[var(--foreground)] hover:bg-[var(--surface-light)] disabled:opacity-50"
+                  >
+                    Search
+                  </button>
+                </div>
+                {searchResult && (
+                  <div className="mt-4 space-y-3">
+                    <p className="text-sm text-[var(--muted)]">
+                      {searchResult.results.length} result{searchResult.results.length !== 1 ? "s" : ""}
+                    </p>
+                    {searchResult.results.map((chunk) => {
+                      const isExpanded = expandedChunks.has(chunk.chunk_id);
+                      const displayContent = chunk.content.length > 300 && !isExpanded
+                        ? chunk.content.slice(0, 300) + "..." : chunk.content;
+                      return (
+                        <div key={chunk.chunk_id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-3 text-xs text-[var(--muted)]">
+                              {chunk.section_title && <span className="font-medium text-[var(--foreground)]">{chunk.section_title}</span>}
+                              {chunk.page_number && <span>Page {chunk.page_number}</span>}
+                            </div>
+                            <span className="text-xs font-medium text-[var(--accent)]">{(chunk.similarity_score * 100).toFixed(1)}%</span>
+                          </div>
+                          <p className="text-sm leading-relaxed font-content whitespace-pre-wrap">{displayContent}</p>
+                          {chunk.content.length > 300 && (
+                            <button onClick={() => toggleExpand(chunk.chunk_id)} className="mt-2 text-xs text-[var(--accent)] hover:underline">
+                              {isExpanded ? "Show less" : "Show more"}
+                            </button>
+                          )}
                         </div>
-                        <span className="text-xs font-medium text-[var(--accent)]">{(chunk.similarity_score * 100).toFixed(1)}%</span>
-                      </div>
-                      <p className="text-sm leading-relaxed font-content whitespace-pre-wrap">{displayContent}</p>
-                      {chunk.content.length > 300 && (
-                        <button onClick={() => toggleExpand(chunk.chunk_id)} className="mt-2 text-xs text-[var(--accent)] hover:underline">
-                          {isExpanded ? "Show less" : "Show more"}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>

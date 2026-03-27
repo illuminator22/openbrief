@@ -4,7 +4,7 @@ logging.basicConfig(level=logging.INFO)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import analysis_router, documents_router, evaluation_router, settings_router
+from api.routes import analysis_router, documents_router, evaluation_router, routing_router, settings_router
 from config import settings
 
 app = FastAPI(
@@ -25,6 +25,7 @@ app.include_router(documents_router, prefix="/api/documents", tags=["documents"]
 app.include_router(settings_router, prefix="/api/settings", tags=["settings"])
 app.include_router(analysis_router, prefix="/api/analysis", tags=["analysis"])
 app.include_router(evaluation_router, prefix="/api/evaluation", tags=["evaluation"])
+app.include_router(routing_router, prefix="/api/routing", tags=["routing"])
 
 
 @app.get("/health")

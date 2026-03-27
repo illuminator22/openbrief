@@ -13,6 +13,7 @@ from config import settings
 from core.rag.full_review import full_review_document
 from core.rag.pipeline import query_document, _CONFIDENCE_MAP
 from core.rag.pricing import VALID_MODEL_IDS, estimate_cost
+from core.routing.semantic_router import get_semantic_router
 from core.rag.token_counter import count_document_tokens, count_text_tokens, get_review_strategy
 from core.rag.prompts import RAG_SYSTEM_PROMPT
 from db.database import get_db
@@ -394,10 +395,10 @@ async def get_latest_review(
     current_user: User = Depends(get_current_user),
 ) -> FullReviewResponse | None:
     """Get the latest full review for a document, if one exists."""
-    from sqlalchemy import select
+    from sqlalchemy import select as sa_select
 
     stmt = (
-        select(Analysis)
+        sa_select(Analysis)
         .where(Analysis.document_id == document_id)
         .where(Analysis.user_id == current_user.id)
         .where(Analysis.analysis_type == "full_review")
@@ -431,3 +432,194 @@ async def get_latest_review(
         response_time_ms=metadata.get("response_time_ms", 0),
         total_tokens=metadata.get("total_tokens", 0),
     )
+
+
+# ---------------------------------------------------------------------------
+# Unified routing endpoint
+# ---------------------------------------------------------------------------
+
+
+class UnifiedRequest(BaseModel):
+    """Request body for the unified routing endpoint."""
+
+    document_id: uuid.UUID
+    text: str = Field(..., min_length=1, max_length=2000)
+    model: str | None = None
+    force_mode: str | None = Field(None, pattern="^(targeted_question|full_review)$")
+
+
+class RoutingInfo(BaseModel):
+    """Routing classification details."""
+
+    route: str
+    confidence: float
+    full_review_score: float
+    targeted_score: float
+    low_confidence: bool
+
+
+class UnifiedResponse(BaseModel):
+    """Response from the unified endpoint.
+
+    Either query_result or estimate is populated, never both.
+    """
+
+    route_detected: str
+    routing: RoutingInfo
+    query_result: QueryResponse | None = None
+    estimate: EstimateResponse | None = None
+
+
+@router.post("/unified", response_model=UnifiedResponse)
+async def unified_analysis(
+    request: UnifiedRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> UnifiedResponse:
+    """Unified endpoint that auto-routes user input to the correct pipeline.
+
+    For targeted questions: runs the query pipeline and returns the answer.
+    For full review requests: returns the cost estimate for user confirmation.
+    NEVER auto-runs a full review — always requires explicit confirmation.
+    """
+    if request.model and request.model not in VALID_MODEL_IDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported model: '{request.model}'. "
+            f"Supported: {', '.join(sorted(VALID_MODEL_IDS))}",
+        )
+
+    # Determine route
+    if request.force_mode:
+        routing_result = {
+            "route": request.force_mode,
+            "confidence": 1.0,
+            "full_review_score": 1.0 if request.force_mode == "full_review" else 0.0,
+            "targeted_score": 1.0 if request.force_mode == "targeted_question" else 0.0,
+            "low_confidence": False,
+        }
+    else:
+        semantic_router = get_semantic_router()
+        routing_result = semantic_router.classify(request.text)
+
+    routing_info = RoutingInfo(**routing_result)
+    route = routing_result["route"]
+
+    if route == "targeted_question":
+        # Run the query pipeline directly
+        try:
+            result = await query_document(
+                document_id=request.document_id,
+                question=request.text,
+                db=db,
+                user=current_user,
+                model_override=request.model,
+            )
+        except RAGQueryError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except LLMProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+        # Store in analyses table
+        confidence_str = result.get("confidence", "low")
+        confidence_num = _CONFIDENCE_MAP.get(confidence_str, 0.3)
+        analysis = Analysis(
+            user_id=current_user.id,
+            document_id=request.document_id,
+            analysis_type="targeted_question",
+            query=request.text,
+            result=result,
+            confidence_score=confidence_num,
+        )
+        db.add(analysis)
+        await db.flush()
+
+        metadata_dict = result.get("metadata", {})
+        citations = [
+            CitationResponse(
+                excerpt_number=c.get("excerpt_number", 0),
+                chunk_id=c.get("chunk_id"),
+                page_number=c.get("page_number"),
+                section_title=c.get("section_title"),
+                relevant_quote=c.get("relevant_quote", ""),
+            )
+            for c in result.get("citations", [])
+        ]
+
+        query_response = QueryResponse(
+            analysis_id=analysis.id,
+            answer=result.get("answer", ""),
+            citations=citations,
+            confidence=confidence_str,
+            insufficient_information=result.get("insufficient_information", False),
+            model_used=metadata_dict.get("model_used", "unknown"),
+            response_time_ms=metadata_dict.get("response_time_ms", 0),
+        )
+
+        return UnifiedResponse(
+            route_detected=route,
+            routing=routing_info,
+            query_result=query_response,
+            estimate=None,
+        )
+
+    else:
+        # Full review detected — return cost estimate, don't run
+        document = await db.get(Document, request.document_id)
+        if document is None or document.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if document.upload_status != "completed":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Document is not ready (status: {document.upload_status})",
+            )
+
+        model = request.model or current_user.llm_model or settings.default_llm_model
+        doc_tokens = await count_document_tokens(request.document_id, db)
+        total_doc_tokens = doc_tokens["total_tokens"]
+        chunk_count = doc_tokens["chunk_count"]
+
+        review_strategy = get_review_strategy(total_doc_tokens)
+        strategy = review_strategy["strategy"]
+
+        input_tokens = total_doc_tokens + _FULL_REVIEW_PROMPT_OVERHEAD
+        estimated_output = min(int(input_tokens * 0.2), 8192)
+        if strategy == "map_reduce":
+            input_tokens = int(input_tokens * _MAP_REDUCE_OVERHEAD_MULTIPLIER)
+
+        cost_result = estimate_cost(input_tokens, estimated_output, model)
+        total_cost = cost_result["total_estimated_cost"]
+        cost_str = f"${total_cost:.2f}" if total_cost is not None else "unknown"
+        strategy_label = "single call" if strategy == "single_call" else "map-reduce"
+
+        cost_breakdown = None
+        if cost_result["pricing_available"]:
+            cost_breakdown = CostBreakdown(
+                input_cost=cost_result["input_cost"],
+                output_cost=cost_result["output_cost"],
+                total=cost_result["total_estimated_cost"],
+            )
+
+        estimate_response = EstimateResponse(
+            document_id=request.document_id,
+            operation="full_review",
+            model=model,
+            input_tokens=input_tokens,
+            estimated_output_tokens=estimated_output,
+            estimated_cost=cost_breakdown,
+            strategy=strategy,
+            threshold_tokens=settings.full_review_token_threshold,
+            pricing_available=cost_result["pricing_available"],
+            message=(
+                f"Full review of {chunk_count} chunks "
+                f"(~{total_doc_tokens:,} tokens, {strategy_label}). "
+                f"Estimated cost: ~{cost_str} with {model}."
+            ),
+        )
+
+        return UnifiedResponse(
+            route_detected=route,
+            routing=routing_info,
+            query_result=None,
+            estimate=estimate_response,
+        )
