@@ -51,8 +51,8 @@ Rules:
 - Query 2: rephrase using different legal terminology (e.g., "termination" → "cancellation or ending of agreement")
 - Query 3: focus on a related concept the document might address (e.g., "termination clause" → "notice period for ending the contract")
 
-Return ONLY a JSON array of 3 strings. No explanation, no markdown.
-Example: ["what is the termination clause", "cancellation or ending of agreement provisions", "notice period required to end the contract"]"""
+Return a JSON object with a "queries" key containing an array of 3 strings. No explanation.
+Example: {"queries": ["what is the termination clause", "cancellation or ending of agreement provisions", "notice period required to end the contract"]}"""
 
 
 class ResearchAgent:
@@ -213,16 +213,34 @@ class ResearchAgent:
             json_mode=True,
         )
 
-        # Parse JSON array
+        # Parse JSON — handle both bare arrays and wrapped objects
         cleaned = response.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
         if cleaned.endswith("```"):
             cleaned = cleaned[:-3]
 
-        queries = json.loads(cleaned.strip())
+        parsed = json.loads(cleaned.strip())
 
-        if not isinstance(queries, list) or len(queries) == 0:
+        # OpenAI json_mode returns objects, not bare arrays
+        # Handle: {"queries": [...]} or {"alternatives": [...]} or [...]
+        if isinstance(parsed, dict):
+            # Find the first list value in the dict
+            queries = None
+            for v in parsed.values():
+                if isinstance(v, list):
+                    queries = v
+                    break
+            if queries is None:
+                logger.warning("Reformulation returned dict with no list: %s", parsed)
+                return [query]
+        elif isinstance(parsed, list):
+            queries = parsed
+        else:
+            logger.warning("Reformulation returned unexpected type: %s", type(parsed))
+            return [query]
+
+        if len(queries) == 0:
             return [query]
 
         # Ensure original query is included
