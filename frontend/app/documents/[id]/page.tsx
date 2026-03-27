@@ -421,222 +421,8 @@ export default function DocumentDetailPage() {
 
       {document.upload_status === "completed" && (
         <>
-          {/* Full Review button */}
+          {/* Query section — Ask/Search */}
           <div className="mt-6">
-            <button
-              onClick={handleEstimate}
-              disabled={!hasApiKey || reviewLoading || estimateLoading}
-              title={!hasApiKey ? "Configure your API key in Settings first" : ""}
-              className="rounded-lg border border-[var(--accent)] px-5 py-2.5 text-sm font-medium text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/10 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {reviewLoading ? "Running review..." : "Full Document Review"}
-            </button>
-            {!hasApiKey && (
-              <p className="mt-1 text-xs text-[var(--accent)]">
-                <Link href="/settings" className="underline">Configure your API key</Link> to run reviews.
-              </p>
-            )}
-          </div>
-
-          {/* Cost estimate modal */}
-          {showEstimate && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-6 w-full max-w-md shadow-xl">
-                <h3 className="text-lg font-semibold">Full Document Review</h3>
-                <p className="mt-1 text-sm text-[var(--muted)]">{document.filename}</p>
-
-                {estimateLoading ? (
-                  <div className="mt-4 text-center py-6">
-                    <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[var(--muted)]/30 border-t-[var(--accent)]" />
-                    <p className="mt-2 text-sm text-[var(--muted)]">Calculating estimate...</p>
-                  </div>
-                ) : estimate ? (
-                  <div className="mt-4 space-y-4">
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-[var(--muted)]">Input tokens</span>
-                        <span>{estimate.input_tokens.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-[var(--muted)]">Est. output tokens</span>
-                        <span>{estimate.estimated_output_tokens.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-[var(--muted)]">Strategy</span>
-                        <span>{estimate.strategy === "single_call" ? "Single call" : "Map-reduce"}</span>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs text-[var(--muted)] mb-1">Model</label>
-                      <select
-                        value={estimateModel}
-                        onChange={(e) => setEstimateModel(e.target.value)}
-                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent)] focus:outline-none"
-                      >
-                        {allModels.map((m) => (
-                          <option key={m.id} value={m.id}>{m.name}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {estimatedCost() && (
-                      <div className="rounded-lg bg-[var(--surface)] p-3 text-center">
-                        <p className="text-2xl font-semibold">${estimatedCost()!.total.toFixed(2)}</p>
-                        <p className="text-xs text-[var(--muted)]">Estimated cost</p>
-                      </div>
-                    )}
-
-                    <div className="flex gap-3">
-                      <button
-                        onClick={handleRunReview}
-                        className="flex-1 rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] active:scale-[0.98]"
-                      >
-                        Run Full Review
-                      </button>
-                      <button
-                        onClick={() => setShowEstimate(false)}
-                        className="flex-1 rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--muted)] transition-colors hover:bg-[var(--surface)]"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          )}
-
-          {/* Review loading state */}
-          {reviewLoading && (
-            <div className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
-              <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[var(--muted)]/30 border-t-[var(--accent)]" />
-              <p className="mt-3 text-sm">Analyzing document...</p>
-              <p className="mt-1 text-xs text-[var(--muted)]">This may take 30-60 seconds.</p>
-            </div>
-          )}
-
-          {/* Review error */}
-          {reviewError && (
-            <div className="mt-4 rounded-xl border border-[var(--error)]/30 bg-[var(--error)]/5 p-3">
-              <p className="text-sm text-[var(--error)]">{reviewError}</p>
-            </div>
-          )}
-
-          {/* Full review results */}
-          {reviewResult && !reviewLoading && (
-            <div className="mt-6 space-y-6">
-              {/* Header */}
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span className="text-sm font-medium">{reviewResult.document_type}</span>
-                  <RiskBadge level={reviewResult.overall_risk_assessment} />
-                  <ConfidenceBadge level={reviewResult.confidence} />
-                  <span className="text-xs text-[var(--muted)]">{reviewResult.model_used}</span>
-                  <span className="text-xs text-[var(--muted)]">{(reviewResult.response_time_ms / 1000).toFixed(1)}s</span>
-                </div>
-                {reviewResult.parties.length > 0 && (
-                  <p className="mt-2 text-xs text-[var(--muted)]">
-                    Parties: {reviewResult.parties.join(", ")}
-                  </p>
-                )}
-              </div>
-
-              {/* Summary */}
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-                <h4 className="text-sm font-medium text-[var(--muted)] mb-2">Executive Summary</h4>
-                <p className="text-sm leading-relaxed font-content whitespace-pre-wrap">{reviewResult.summary}</p>
-              </div>
-
-              {/* Key findings */}
-              {sortedFindings.length > 0 && (
-                <div>
-                  <h4 className="text-sm font-medium text-[var(--muted)] mb-3">
-                    Key Findings ({sortedFindings.length})
-                  </h4>
-                  <div className="space-y-2">
-                    {sortedFindings.map((f, i) => {
-                      const isOpen = expandedFindings.has(i);
-                      const borderColor = SeverityBorder({ severity: f.severity });
-                      return (
-                        <div
-                          key={i}
-                          className={`rounded-xl border border-[var(--border)] bg-[var(--surface)] border-l-4 ${borderColor} overflow-hidden`}
-                        >
-                          <button
-                            onClick={() => toggleFinding(i)}
-                            className="w-full text-left p-4 flex items-center justify-between"
-                          >
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <CategoryBadge category={f.category} />
-                              <span className="text-sm font-medium">{f.title}</span>
-                              {f.section_reference && (
-                                <span className="text-xs text-[var(--muted)]">{f.section_reference}</span>
-                              )}
-                            </div>
-                            <svg
-                              className={`w-4 h-4 text-[var(--muted)] transition-transform ${isOpen ? "rotate-180" : ""}`}
-                              fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}
-                            >
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </button>
-                          {isOpen && (
-                            <div className="px-4 pb-4 space-y-2">
-                              <p className="text-sm leading-relaxed font-content">{f.description}</p>
-                              {f.recommendation && (
-                                <div className="rounded-lg bg-[var(--background)] p-3">
-                                  <p className="text-xs text-[var(--muted)] mb-1">Recommendation</p>
-                                  <p className="text-sm">{f.recommendation}</p>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Deadlines */}
-              {reviewResult.deadlines.length > 0 && (
-                <div>
-                  <h4 className="text-sm font-medium text-[var(--muted)] mb-3">
-                    Deadlines ({reviewResult.deadlines.length})
-                  </h4>
-                  <div className="rounded-xl border border-[var(--border)] overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-[var(--surface)] text-[var(--muted)] text-left">
-                          <th className="px-4 py-2 font-medium">Description</th>
-                          <th className="px-4 py-2 font-medium">Date/Period</th>
-                          <th className="px-4 py-2 font-medium">Section</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {reviewResult.deadlines.map((d, i) => (
-                          <tr key={i} className="border-t border-[var(--border)]">
-                            <td className="px-4 py-2">{d.description}</td>
-                            <td className="px-4 py-2 text-[var(--accent)]">{d.date_or_period}</td>
-                            <td className="px-4 py-2 text-[var(--muted)]">{d.section_reference || "—"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Divider between review and query sections */}
-          {(reviewResult || reviewLoading) && (
-            <div className="my-8 border-t border-[var(--border)]" />
-          )}
-
-          {/* Query section */}
-          <div className="mt-8">
             <div className="flex items-center gap-2 mb-4">
               <button
                 onClick={() => setMode("ask")}
@@ -773,6 +559,218 @@ export default function DocumentDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Divider */}
+          <div className="my-8 border-t border-[var(--border)]" />
+
+          {/* Full Review button */}
+          <div>
+            <button
+              onClick={handleEstimate}
+              disabled={!hasApiKey || reviewLoading || estimateLoading}
+              title={!hasApiKey ? "Configure your API key in Settings first" : ""}
+              className="rounded-lg border border-[var(--accent)] px-5 py-2.5 text-sm font-medium text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/10 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {reviewLoading ? "Running review..." : "Full Document Review"}
+            </button>
+            {!hasApiKey && (
+              <p className="mt-1 text-xs text-[var(--accent)]">
+                <Link href="/settings" className="underline">Configure your API key</Link> to run reviews.
+              </p>
+            )}
+          </div>
+
+          {/* Cost estimate modal */}
+          {showEstimate && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-6 w-full max-w-md shadow-xl">
+                <h3 className="text-lg font-semibold">Full Document Review</h3>
+                <p className="mt-1 text-sm text-[var(--muted)]">{document.filename}</p>
+
+                {estimateLoading ? (
+                  <div className="mt-4 text-center py-6">
+                    <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[var(--muted)]/30 border-t-[var(--accent)]" />
+                    <p className="mt-2 text-sm text-[var(--muted)]">Calculating estimate...</p>
+                  </div>
+                ) : estimate ? (
+                  <div className="mt-4 space-y-4">
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-[var(--muted)]">Input tokens</span>
+                        <span>{estimate.input_tokens.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-[var(--muted)]">Est. output tokens</span>
+                        <span>{estimate.estimated_output_tokens.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-[var(--muted)]">Strategy</span>
+                        <span>{estimate.strategy === "single_call" ? "Single call" : "Map-reduce"}</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-[var(--muted)] mb-1">Model</label>
+                      <select
+                        value={estimateModel}
+                        onChange={(e) => setEstimateModel(e.target.value)}
+                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent)] focus:outline-none"
+                      >
+                        {allModels.map((m) => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {estimatedCost() && (
+                      <div className="rounded-lg bg-[var(--surface)] p-3 text-center">
+                        <p className="text-2xl font-semibold">${estimatedCost()!.total.toFixed(2)}</p>
+                        <p className="text-xs text-[var(--muted)]">Estimated cost</p>
+                      </div>
+                    )}
+
+                    <div className="flex gap-3">
+                      <button
+                        onClick={handleRunReview}
+                        className="flex-1 rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] active:scale-[0.98]"
+                      >
+                        Run Full Review
+                      </button>
+                      <button
+                        onClick={() => setShowEstimate(false)}
+                        className="flex-1 rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--muted)] transition-colors hover:bg-[var(--surface)]"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )}
+
+          {/* Review loading state */}
+          {reviewLoading && (
+            <div className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
+              <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[var(--muted)]/30 border-t-[var(--accent)]" />
+              <p className="mt-3 text-sm">Analyzing document...</p>
+              <p className="mt-1 text-xs text-[var(--muted)]">This may take 30-60 seconds.</p>
+            </div>
+          )}
+
+          {/* Review error */}
+          {reviewError && (
+            <div className="mt-4 rounded-xl border border-[var(--error)]/30 bg-[var(--error)]/5 p-3">
+              <p className="text-sm text-[var(--error)]">{reviewError}</p>
+            </div>
+          )}
+
+          {/* Full review results */}
+          {reviewResult && !reviewLoading && (
+            <div className="mt-6 space-y-6">
+              {/* Header */}
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-sm font-medium">{reviewResult.document_type}</span>
+                  <RiskBadge level={reviewResult.overall_risk_assessment} />
+                  <ConfidenceBadge level={reviewResult.confidence} />
+                  <span className="text-xs text-[var(--muted)]">{reviewResult.model_used}</span>
+                </div>
+                {reviewResult.parties.length > 0 && (
+                  <p className="mt-2 text-xs text-[var(--muted)]">
+                    Parties: {reviewResult.parties.join(", ")}
+                  </p>
+                )}
+              </div>
+
+              {/* Summary */}
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+                <h4 className="text-sm font-medium text-[var(--muted)] mb-2">Executive Summary</h4>
+                <p className="text-sm leading-relaxed font-content whitespace-pre-wrap">{reviewResult.summary}</p>
+              </div>
+
+              {/* Key findings */}
+              {sortedFindings.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium text-[var(--muted)] mb-3">
+                    Key Findings ({sortedFindings.length})
+                  </h4>
+                  <div className="space-y-2">
+                    {sortedFindings.map((f, i) => {
+                      const isOpen = expandedFindings.has(i);
+                      const borderColor = SeverityBorder({ severity: f.severity });
+                      return (
+                        <div
+                          key={i}
+                          className={`rounded-xl border border-[var(--border)] bg-[var(--surface)] border-l-4 ${borderColor} overflow-hidden`}
+                        >
+                          <button
+                            onClick={() => toggleFinding(i)}
+                            className="w-full text-left p-4 flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <CategoryBadge category={f.category} />
+                              <span className="text-sm font-medium">{f.title}</span>
+                              {f.section_reference && (
+                                <span className="text-xs text-[var(--muted)]">{f.section_reference}</span>
+                              )}
+                            </div>
+                            <svg
+                              className={`w-4 h-4 text-[var(--muted)] transition-transform ${isOpen ? "rotate-180" : ""}`}
+                              fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
+                          {isOpen && (
+                            <div className="px-4 pb-4 space-y-2">
+                              <p className="text-sm leading-relaxed font-content">{f.description}</p>
+                              {f.recommendation && (
+                                <div className="rounded-lg bg-[var(--background)] p-3">
+                                  <p className="text-xs text-[var(--muted)] mb-1">Recommendation</p>
+                                  <p className="text-sm">{f.recommendation}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Deadlines */}
+              {reviewResult.deadlines.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium text-[var(--muted)] mb-3">
+                    Deadlines ({reviewResult.deadlines.length})
+                  </h4>
+                  <div className="rounded-xl border border-[var(--border)] overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-[var(--surface)] text-[var(--muted)] text-left">
+                          <th className="px-4 py-2 font-medium">Description</th>
+                          <th className="px-4 py-2 font-medium">Date/Period</th>
+                          <th className="px-4 py-2 font-medium">Section</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reviewResult.deadlines.map((d, i) => (
+                          <tr key={i} className="border-t border-[var(--border)]">
+                            <td className="px-4 py-2">{d.description}</td>
+                            <td className="px-4 py-2 text-[var(--accent)]">{d.date_or_period}</td>
+                            <td className="px-4 py-2 text-[var(--muted)]">{d.section_reference || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
         </>
       )}
 
