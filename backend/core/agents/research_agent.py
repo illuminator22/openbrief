@@ -52,7 +52,7 @@ Rules:
 - Query 3: focus on a related concept the document might address (e.g., "termination clause" → "notice period for ending the contract")
 
 Return a JSON object with a "queries" key containing an array of 3 strings. No explanation.
-Example: {"queries": ["what is the termination clause", "cancellation or ending of agreement provisions", "notice period required to end the contract"]}"""
+Example: {{"queries": ["what is the termination clause", "cancellation or ending of agreement provisions", "notice period required to end the contract"]}}"""
 
 
 class ResearchAgent:
