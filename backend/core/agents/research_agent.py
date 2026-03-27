@@ -107,7 +107,7 @@ class ResearchAgent:
                     )
                 except Exception as exc:
                     # Reformulation failure is non-fatal — fall back to original query
-                    logger.warning("Research Agent: query reformulation failed, using original: %s", exc)
+                    logger.warning("Research Agent: query reformulation failed, using original. Error: %r", exc)
                     queries = [state.query]
 
             # Run retrieval for all queries and deduplicate
@@ -214,6 +214,7 @@ class ResearchAgent:
         )
 
         # Parse JSON — handle both bare arrays and wrapped objects
+        logger.info("Research Agent: raw reformulation response: %s", response[:500])
         cleaned = response.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
