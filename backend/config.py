@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     # RAG Config
     rag_chunk_size: int = 512
     rag_chunk_overlap: int = 50
-    rag_top_k: int = 5
+    rag_top_k: int = 7
 
     # Server
     host: str = "0.0.0.0"
