@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 # Cheapest model per provider for query reformulation
 _REFORMULATION_MODELS: dict[str, str] = {
-    "openai": "gpt-5.4-nano",
+    "openai": "gpt-5.4-mini",
     "anthropic": "claude-haiku-4-5-20251001",
     "deepseek": "deepseek-reasoner",
 }
