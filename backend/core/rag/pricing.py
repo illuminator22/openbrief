@@ -13,6 +13,7 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     # OpenAI
     "gpt-5.4": {"input": 2.50, "output": 15.00},
     "gpt-5.4-mini": {"input": 0.75, "output": 4.50},
+    "gpt-5.4-nano": {"input": 0.20, "output": 1.25},
     # Anthropic
     "claude-opus-4-6": {"input": 5.00, "output": 25.00},
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
@@ -25,6 +26,7 @@ SUPPORTED_MODELS: dict[str, list[dict[str, str]]] = {
     "openai": [
         {"id": "gpt-5.4", "name": "GPT-5.4", "description": "Frontier reasoning model"},
         {"id": "gpt-5.4-mini", "name": "GPT-5.4 Mini", "description": "Fast, cost-effective"},
+        {"id": "gpt-5.4-nano", "name": "GPT-5.4 Nano", "description": "Fastest, most affordable — great for simple queries"},
     ],
     "anthropic": [
         {"id": "claude-opus-4-6", "name": "Claude Opus 4.6", "description": "Most capable, 1M context"},
