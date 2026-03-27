@@ -221,11 +221,13 @@ class ResearchAgent:
         provider = get_llm_provider(api_key, user.llm_provider)
 
         prompt = _REFORMULATION_PROMPT.format(query=query)
+        # Don't use json_mode — it causes KeyError on some nano models.
+        # The prompt is explicit enough about JSON format.
         response = await provider.complete(
             messages=[{"role": "user", "content": prompt}],
             model=model,
             max_tokens=200,
-            json_mode=True,
+            json_mode=False,
         )
 
         # Parse JSON — handle both bare arrays and wrapped objects
