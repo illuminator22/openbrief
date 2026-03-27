@@ -40,12 +40,19 @@ _REFORMULATION_MODELS: dict[str, str] = {
     "deepseek": "deepseek-reasoner",
 }
 
-_REFORMULATION_PROMPT = """Given a user's question about a legal document, generate 2-3 alternative search queries that would find relevant sections. The alternatives should use different wording, synonyms, or legal terminology to cast a wider retrieval net.
+_REFORMULATION_PROMPT = """You are a legal search assistant. A user asked this question about a legal document:
 
-User question: {query}
+"{query}"
 
-Return ONLY a JSON array of strings. Include the original query as the first item.
-Example: ["original query", "alternative 1", "alternative 2"]"""
+Generate exactly 3 DIFFERENT search queries that would help find relevant sections in the document. Each query MUST use different wording, synonyms, or legal terminology — do NOT repeat or paraphrase the original query.
+
+Rules:
+- Query 1: the original question as-is
+- Query 2: rephrase using different legal terminology (e.g., "termination" → "cancellation or ending of agreement")
+- Query 3: focus on a related concept the document might address (e.g., "termination clause" → "notice period for ending the contract")
+
+Return ONLY a JSON array of 3 strings. No explanation, no markdown.
+Example: ["what is the termination clause", "cancellation or ending of agreement provisions", "notice period required to end the contract"]"""
 
 
 class ResearchAgent:
