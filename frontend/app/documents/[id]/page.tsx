@@ -21,6 +21,7 @@ interface ModelInfo {
   id: string;
   name: string;
   description: string;
+  tier?: string;
   pricing: { input: number; output: number } | null;
 }
 
@@ -469,7 +470,7 @@ export default function DocumentDetailPage() {
                   className="rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-1.5 text-xs text-[var(--foreground)] focus:border-[var(--accent)] focus:outline-none"
                 >
                   {providerModels.map((m) => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
+                    <option key={m.id} value={m.id}>{m.tier ? `${m.tier} — ` : ""}{m.name}</option>
                   ))}
                 </select>
               </div>
@@ -670,7 +671,7 @@ export default function DocumentDetailPage() {
                         className="w-full rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent)] focus:outline-none"
                       >
                         {allModels.map((m) => (
-                          <option key={m.id} value={m.id}>{m.name}</option>
+                          <option key={m.id} value={m.id}>{m.tier ? `${m.tier} — ` : ""}{m.name}</option>
                         ))}
                       </select>
                     </div>

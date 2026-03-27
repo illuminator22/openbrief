@@ -24,16 +24,16 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
 # Models available for user selection, grouped by provider
 SUPPORTED_MODELS: dict[str, list[dict[str, str]]] = {
     "openai": [
-        {"id": "gpt-5.4", "name": "GPT-5.4", "description": "Frontier reasoning model"},
-        {"id": "gpt-5.4-mini", "name": "GPT-5.4 Mini", "description": "Fast, cost-effective"},
-        {"id": "gpt-5.4-nano", "name": "GPT-5.4 Nano", "description": "Fastest, most affordable — great for simple queries"},
+        {"id": "gpt-5.4", "name": "GPT-5.4", "tier": "Premium", "description": "Best for complex analysis and full reviews"},
+        {"id": "gpt-5.4-mini", "name": "GPT-5.4 Mini", "tier": "Standard", "description": "Good balance of quality and speed"},
+        {"id": "gpt-5.4-nano", "name": "GPT-5.4 Nano", "tier": "Quick", "description": "Fast and affordable for quick questions"},
     ],
     "anthropic": [
-        {"id": "claude-opus-4-6", "name": "Claude Opus 4.6", "description": "Most capable, 1M context"},
-        {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "description": "Balanced performance and cost"},
+        {"id": "claude-opus-4-6", "name": "Claude Opus 4.6", "tier": "Premium", "description": "Best for complex analysis and full reviews"},
+        {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "tier": "Standard", "description": "Good balance of quality and speed"},
     ],
     "deepseek": [
-        {"id": "deepseek-reasoner", "name": "DeepSeek R1", "description": "Advanced reasoning, low cost"},
+        {"id": "deepseek-reasoner", "name": "DeepSeek R1", "tier": "Standard", "description": "Advanced reasoning at low cost"},
     ],
 }
 

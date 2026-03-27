@@ -15,6 +15,7 @@ interface ModelInfo {
   id: string;
   name: string;
   description: string;
+  tier?: string;
   pricing: { input: number; output: number } | null;
 }
 
@@ -202,9 +203,9 @@ export default function SettingsPage() {
             >
               {currentModels.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.name} — {m.description}
+                  {m.tier ? `${m.tier} — ` : ""}{m.name}: {m.description}
                   {m.pricing
-                    ? ` ($${m.pricing.input}/${m.pricing.output} per 1M tokens)`
+                    ? ` ($${m.pricing.input}/$${m.pricing.output} per 1M tokens)`
                     : ""}
                 </option>
               ))}
