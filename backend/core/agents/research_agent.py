@@ -229,34 +229,36 @@ class ResearchAgent:
         )
 
         # Parse JSON — handle both bare arrays and wrapped objects
-        logger.info("Research Agent: raw reformulation response: %s", response[:500])
-        cleaned = response.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
+        logger.info("Research Agent: raw reformulation response: %r", response[:500])
 
-        parsed = json.loads(cleaned.strip())
+        try:
+            cleaned = response.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
 
-        # OpenAI json_mode returns objects, not bare arrays
-        # Handle: {"queries": [...]} or {"alternatives": [...]} or [...]
-        if isinstance(parsed, dict):
-            # Find the first list value in the dict
-            queries = None
-            for v in parsed.values():
-                if isinstance(v, list):
-                    queries = v
-                    break
-            if queries is None:
-                logger.warning("Reformulation returned dict with no list: %s", parsed)
+            parsed = json.loads(cleaned.strip())
+            logger.info("Research Agent: parsed type=%s, value=%r", type(parsed).__name__, parsed)
+
+            # Extract list of queries from whatever shape the LLM returned
+            queries: list[str] = []
+
+            if isinstance(parsed, list):
+                queries = [str(q) for q in parsed if isinstance(q, str)]
+            elif isinstance(parsed, dict):
+                # Find any list of strings in the dict values
+                for v in parsed.values():
+                    if isinstance(v, list) and all(isinstance(x, str) for x in v):
+                        queries = v
+                        break
+
+            if not queries:
+                logger.warning("Reformulation: could not extract queries from: %r", parsed)
                 return [query]
-        elif isinstance(parsed, list):
-            queries = parsed
-        else:
-            logger.warning("Reformulation returned unexpected type: %s", type(parsed))
-            return [query]
 
-        if len(queries) == 0:
+        except json.JSONDecodeError as exc:
+            logger.warning("Reformulation: JSON parse failed: %s. Raw: %r", exc, response[:200])
             return [query]
 
         # Ensure original query is included
