@@ -183,7 +183,8 @@ export default function EvaluationPage() {
         <MetricCard
           label="Hallucination Rate"
           value={summary.avg_hallucination_score}
-          threshold={{ green: 0.95, yellow: 0.90 }}
+          threshold={{ green: 0.05, yellow: 0.10 }}
+          inverse
         />
         <MetricCard
           label="Answer Relevance"
