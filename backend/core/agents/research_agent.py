@@ -95,7 +95,22 @@ class ResearchAgent:
             queries = [state.query]
             reformulation_ms = 0
 
-            if reformulate_queries and user and user.encrypted_llm_key:
+            # Refresh user to ensure encrypted_llm_key is loaded (async SQLAlchemy
+            # may not have it if the object was loaded in a different session scope)
+            if reformulate_queries and user:
+                try:
+                    await db.refresh(user, ["encrypted_llm_key", "llm_provider"])
+                except Exception:
+                    pass  # If refresh fails, we'll check the attribute below
+
+            has_key = bool(user and user.encrypted_llm_key)
+            logger.info(
+                "Research Agent: reformulate=%s, user=%s, has_key=%s, provider=%s",
+                reformulate_queries, bool(user), has_key,
+                getattr(user, "llm_provider", None) if user else None,
+            )
+
+            if reformulate_queries and has_key:
                 try:
                     reform_start = time.time()
                     alt_queries = await self._reformulate(state.query, user)
