@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 # Cheapest model per provider for query reformulation
 _REFORMULATION_MODELS: dict[str, str] = {
-    "openai": "gpt-5.4-mini",
+    "openai": "gpt-5.4-nano",
     "anthropic": "claude-haiku-4-5-20251001",
     "deepseek": "deepseek-reasoner",
 }
@@ -104,11 +104,6 @@ class ResearchAgent:
                     pass  # If refresh fails, we'll check the attribute below
 
             has_key = bool(user and user.encrypted_llm_key)
-            logger.info(
-                "Research Agent: reformulate=%s, user=%s, has_key=%s, provider=%s",
-                reformulate_queries, bool(user), has_key,
-                getattr(user, "llm_provider", None) if user else None,
-            )
 
             if reformulate_queries and has_key:
                 try:
@@ -231,8 +226,6 @@ class ResearchAgent:
         )
 
         # Parse JSON — handle both bare arrays and wrapped objects
-        logger.info("Research Agent: raw reformulation response: %r", response[:500])
-
         try:
             cleaned = response.strip()
             if cleaned.startswith("```"):
@@ -241,7 +234,6 @@ class ResearchAgent:
                 cleaned = cleaned[:-3]
 
             parsed = json.loads(cleaned.strip())
-            logger.info("Research Agent: parsed type=%s, value=%r", type(parsed).__name__, parsed)
 
             # Extract list of queries from whatever shape the LLM returned
             queries: list[str] = []
